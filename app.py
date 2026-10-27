@@ -1,8 +1,9 @@
 """
-نظامي المالي الشخصي - الإصدار 3.3
+نظامي المالي الشخصي - الإصدار 4.0 (متعدد المستخدمين مع تسجيل دخول)
 تشغيل: py -m streamlit run app.py
 """
 import calendar
+import hashlib
 import html
 import io
 import sqlite3
@@ -24,7 +25,6 @@ CUR = "ج.م"
 MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
 
-# التصنيف: (أيقونة، نوع) — need = احتياج، want = رغبة
 CAT_META = {
     "طعام وشراب": ("🍽️", "need"), "مواصلات": ("🚌", "need"), "فواتير": ("🧾", "need"),
     "صحة": ("🩺", "need"), "تعليم": ("🎓", "need"),
@@ -36,65 +36,76 @@ FIN_KINDS = ["مدخرات", "حساب بنكي", "كاش", "ذهب", "استث�
 LIABILITY = "دين عليّ"
 INCOME_SOURCES = ["راتب", "دخل إضافي", "مكافأة", "حوالة", "أخرى"]
 WISH_KINDS = ["احتياج ضروري", "رغبة ترفيهية", "استثمار/تطوير"]
-NUM = "%g"  # عرض الأرقام بدون أصفار زائدة
+NUM = "%g"
 
 PAGES = {
     "dashboard": "📊 لوحة التحكم", "expenses": "💸 المصاريف", "monthly": "📅 الدخل الشهري",
     "budgets": "🎯 الميزانيات والأهداف", "wishes": "✨ الأمنيات", "settings": "⚙️ الإعدادات",
 }
 
-# هوية الألوان: خلفية سمني، أخضر أساسي، عناوين بني، كتابة سوداء
 C_PRIMARY, C_DEEP, C_INCOME = "#0b5d4b", "#073b30", "#0b5d4b"
 C_EXPENSE, C_ACCENT = "#d1495b", "#c8861a"
 C_INK, C_MUTED, C_HEAD = "#141414", "#4a4a4a", "#5a3e2b"
 C_BG, C_CARD, C_LINE, C_FIELD = "#f4e8c8", "#fbf3dc", "#e0cfa3", "#fdf7e6"
 
 # ==========================================================
-# 1. قاعدة البيانات
+# 1. قاعدة البيانات والأمان
 # ==========================================================
 _lock = threading.Lock()
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 @st.cache_resource
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    
+    # إنشاء الجداول الأساسية
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, 
+            password_hash TEXT NOT NULL, 
+            created_at TEXT
+        );
         CREATE TABLE IF NOT EXISTS monthly_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, month INTEGER NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, year INTEGER NOT NULL, month INTEGER NOT NULL,
             basic_salary REAL DEFAULT 0, cash_income REAL DEFAULT 0,
-            opening_balance REAL DEFAULT 0, carry_note TEXT, UNIQUE(year, month));
+            opening_balance REAL DEFAULT 0, carry_note TEXT, UNIQUE(username, year, month));
         CREATE TABLE IF NOT EXISTS daily_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, month INTEGER NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, year INTEGER NOT NULL, month INTEGER NOT NULL,
             day INTEGER NOT NULL, expense_date DATE NOT NULL, amount REAL NOT NULL,
             details TEXT, category TEXT);
-        CREATE TABLE IF NOT EXISTS budgets (category TEXT PRIMARY KEY, monthly_limit REAL NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS budgets (username TEXT, category TEXT, monthly_limit REAL NOT NULL DEFAULT 0, PRIMARY KEY(username, category));
         CREATE TABLE IF NOT EXISTS goals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, name TEXT NOT NULL,
             target REAL NOT NULL, saved REAL NOT NULL DEFAULT 0, created_at TEXT);
         CREATE TABLE IF NOT EXISTS attachments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            expense_id INTEGER REFERENCES daily_expenses(id) ON DELETE CASCADE,
-            kind TEXT, name TEXT, mime TEXT, data BLOB, note TEXT, doc_date TEXT, created_at TEXT);
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
+            expense_id INTEGER, kind TEXT, name TEXT, mime TEXT, data BLOB, note TEXT, doc_date TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS incomes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, amount REAL NOT NULL, for_year INTEGER NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, amount REAL NOT NULL, for_year INTEGER NOT NULL,
             for_month INTEGER NOT NULL, received_date TEXT NOT NULL, source TEXT, note TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS fin_details (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, name TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, kind TEXT, name TEXT,
             amount REAL NOT NULL DEFAULT 0, note TEXT);
         CREATE TABLE IF NOT EXISTS wishes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, kind TEXT, price REAL NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, name TEXT NOT NULL, kind TEXT, price REAL NOT NULL,
             saved REAL NOT NULL DEFAULT 0, target_date TEXT, note TEXT,
             status TEXT NOT NULL DEFAULT 'active', created_at TEXT, bought_at TEXT);
-        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE INDEX IF NOT EXISTS idx_inc_ym ON incomes(for_year, for_month);
-        CREATE INDEX IF NOT EXISTS idx_exp_ym ON daily_expenses(year, month);
-        CREATE INDEX IF NOT EXISTS idx_exp_cat ON daily_expenses(category);
-        CREATE INDEX IF NOT EXISTS idx_att_exp ON attachments(expense_id);
+        CREATE TABLE IF NOT EXISTS settings (username TEXT, key TEXT, value TEXT, PRIMARY KEY(username, key));
+        CREATE INDEX IF NOT EXISTS idx_inc_ym ON incomes(username, for_year, for_month);
+        CREATE INDEX IF NOT EXISTS idx_exp_ym ON daily_expenses(username, year, month);
+        CREATE INDEX IF NOT EXISTS idx_exp_cat ON daily_expenses(username, category);
     """)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(monthly_data)")]
-    if "carry_note" not in cols:
-        conn.execute("ALTER TABLE monthly_data ADD COLUMN carry_note TEXT")
+    
+    # هجرة تلقائية للبيانات القديمة: إضافة عمود username إذا لم يكن موجوداً
+    tables_to_update = ["monthly_data", "daily_expenses", "budgets", "goals", "attachments", "incomes", "fin_details", "wishes", "settings"]
+    for table in tables_to_update:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "username" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN username TEXT DEFAULT 'admin'")
     conn.commit()
     return conn
 
@@ -125,26 +136,27 @@ def run_many(statements: list) -> None:
             raise
 
 def get_setting(key: str, default: str = "") -> str:
-    df = query_df("SELECT value FROM settings WHERE key=?", (key,))
+    username = st.session_state.get("current_user", "admin")
+    df = query_df("SELECT value FROM settings WHERE username=? AND key=?", (username, key))
     return df.value[0] if not df.empty and df.value[0] is not None else default
 
 def set_setting(key: str, value: str) -> None:
-    run("INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, value))
+    username = st.session_state.get("current_user", "admin")
+    run("INSERT INTO settings(username, key, value) VALUES(?,?,?) ON CONFLICT(username, key) DO UPDATE SET value=excluded.value",
+        (username, key, value))
 
 # ==========================================================
-# 2. الحسابات
+# 2. الحسابات (محدثة لتعتمد على المستخدم)
 # ==========================================================
 def prev_ym(year: int, month: int) -> tuple:
     return (year, month - 1) if month > 1 else (year - 1, 12)
 
 def month_summary(year: int, month: int) -> dict:
-    m = query_df("SELECT basic_salary, cash_income, opening_balance, carry_note FROM monthly_data "
-                 "WHERE year=? AND month=?", (year, month))
-    e = query_df("SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS n FROM daily_expenses "
-                 "WHERE year=? AND month=?", (year, month))
-    r = query_df("SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS n FROM incomes "
-                 "WHERE for_year=? AND for_month=?", (year, month))
+    username = st.session_state.get("current_user", "admin")
+    m = query_df("SELECT basic_salary, cash_income, opening_balance, carry_note FROM monthly_data WHERE username=? AND year=? AND month=?", (username, year, month))
+    e = query_df("SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS n FROM daily_expenses WHERE username=? AND year=? AND month=?", (username, year, month))
+    r = query_df("SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS n FROM incomes WHERE username=? AND for_year=? AND for_month=?", (username, year, month))
+    
     ex = not m.empty
     salary = float(m.basic_salary[0] or 0) if ex else 0.0
     cash = float(m.cash_income[0] or 0) if ex else 0.0
@@ -160,11 +172,11 @@ def month_summary(year: int, month: int) -> dict:
             "closing": opening + saving, "active": ex or income > 0 or exp > 0}
 
 def year_summary(year: int) -> pd.DataFrame:
-    inc = query_df("SELECT month, COALESCE(basic_salary,0) + COALESCE(cash_income,0) AS income, "
-                   "COALESCE(opening_balance,0) AS opening FROM monthly_data WHERE year=?", (year,))
-    exp = query_df("SELECT month, SUM(amount) AS expenses FROM daily_expenses WHERE year=? GROUP BY month", (year,))
-    rec = query_df("SELECT for_month AS month, SUM(amount) AS received FROM incomes "
-                   "WHERE for_year=? GROUP BY for_month", (year,))
+    username = st.session_state.get("current_user", "admin")
+    inc = query_df("SELECT month, COALESCE(basic_salary,0) + COALESCE(cash_income,0) AS income, COALESCE(opening_balance,0) AS opening FROM monthly_data WHERE username=? AND year=?", (username, year))
+    exp = query_df("SELECT month, SUM(amount) AS expenses FROM daily_expenses WHERE username=? AND year=? GROUP BY month", (username, year))
+    rec = query_df("SELECT for_month AS month, SUM(amount) AS received FROM incomes WHERE username=? AND for_year=? GROUP BY for_month", (username, year))
+    
     df = (pd.DataFrame({"month": range(1, 13)}).merge(inc, on="month", how="left")
           .merge(exp, on="month", how="left").merge(rec, on="month", how="left"))
     df = df.fillna({"income": 0.0, "opening": 0.0, "expenses": 0.0, "received": 0.0})
@@ -175,33 +187,34 @@ def year_summary(year: int) -> pd.DataFrame:
     return df
 
 def category_totals(year: int, month=None) -> pd.DataFrame:
-    base = ("SELECT COALESCE(NULLIF(category,''),'أخرى') AS category, SUM(amount) AS amount "
-            "FROM daily_expenses WHERE year=? ")
+    username = st.session_state.get("current_user", "admin")
+    base = "SELECT COALESCE(NULLIF(category,''),'أخرى') AS category, SUM(amount) AS amount FROM daily_expenses WHERE username=? AND year=? "
     if month:
-        return query_df(base + "AND month=? GROUP BY 1 ORDER BY 2 DESC", (year, month))
-    return query_df(base + "GROUP BY 1 ORDER BY 2 DESC", (year,))
+        return query_df(base + "AND month=? GROUP BY 1 ORDER BY 2 DESC", (username, year, month))
+    return query_df(base + "GROUP BY 1 ORDER BY 2 DESC", (username, year))
 
 def get_budgets() -> dict:
-    df = query_df("SELECT category, monthly_limit FROM budgets")
+    username = st.session_state.get("current_user", "admin")
+    df = query_df("SELECT category, monthly_limit FROM budgets WHERE username=?", (username,))
     return dict(zip(df.category, df.monthly_limit))
 
 def all_categories() -> list:
-    used = query_df("SELECT DISTINCT category FROM daily_expenses "
-                    "WHERE category IS NOT NULL AND category<>''").category.tolist()
+    username = st.session_state.get("current_user", "admin")
+    used = query_df("SELECT DISTINCT category FROM daily_expenses WHERE username=? AND category IS NOT NULL AND category<>''", (username,)).category.tolist()
     return list(CAT_META) + [c for c in used if c not in CAT_META]
 
 def cat_label(c: str) -> str:
     return f"{CAT_META.get(c, ('🏷️', ''))[0]} {c}"
 
 def fin_totals():
-    df = query_df("SELECT kind, name, amount, note FROM fin_details ORDER BY id")
+    username = st.session_state.get("current_user", "admin")
+    df = query_df("SELECT kind, name, amount, note FROM fin_details WHERE username=? ORDER BY id", (username,))
     if df.empty:
         return df, 0.0, 0.0
     liab = float(df[df.kind == LIABILITY].amount.sum())
     return df, float(df.amount.sum()) - liab, liab
 
 def month_insights(year: int, month: int, s: dict, prev: dict) -> dict:
-    """مؤشرات ذكية: متوسط يومي، توقع نهاية الشهر، أعلى تصنيف، التغير عن الشهر السابق."""
     today = date.today()
     days_in = calendar.monthrange(year, month)[1]
     is_current = (year, month) == (today.year, today.month)
@@ -212,8 +225,7 @@ def month_insights(year: int, month: int, s: dict, prev: dict) -> dict:
     change = ((s["expenses"] - prev["expenses"]) / prev["expenses"] * 100) if prev["expenses"] > 0 else None
     needs = sum(float(a) for c, a in zip(cats.category, cats.amount) if CAT_META.get(c, ("", "want"))[1] == "need")
     return {"avg": avg, "projected": avg * days_in if is_current else s["expenses"], "is_current": is_current,
-            "top": top, "change": change,
-            "needs_pct": (needs / s["expenses"] * 100) if s["expenses"] > 0 else 0.0}
+            "top": top, "change": change, "needs_pct": (needs / s["expenses"] * 100) if s["expenses"] > 0 else 0.0}
 
 # ==========================================================
 # 3. المرفقات
@@ -225,48 +237,39 @@ def prepare_file(f) -> tuple:
             from PIL import Image, ImageOps
             im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
             im.thumbnail((1800, 1800))
-            if im.mode != "RGB":
-                im = im.convert("RGB")
+            if im.mode != "RGB": im = im.convert("RGB")
             out = io.BytesIO()
             im.save(out, "JPEG", quality=85)
             raw, mime = out.getvalue(), "image/jpeg"
-        except Exception:
-            pass
+        except Exception: pass
     return name, mime, raw
 
 def save_attachments(files, kind: str, expense_id, doc_date: str, note: str = "") -> int:
+    username = st.session_state.get("current_user", "admin")
     stmts = []
     for f in files or []:
         name, mime, raw = prepare_file(f)
-        stmts.append(("INSERT INTO attachments(expense_id, kind, name, mime, data, note, doc_date, created_at) "
-                      "VALUES(?,?,?,?,?,?,?,?)",
-                      (expense_id, kind, name, mime, raw, note, doc_date,
-                       datetime.now().isoformat(timespec="seconds"))))
-    if stmts:
-        run_many(stmts)
+        stmts.append(("INSERT INTO attachments(username, expense_id, kind, name, mime, data, note, doc_date, created_at) "
+                      "VALUES(?,?,?,?,?,?,?,?,?)",
+                      (username, expense_id, kind, name, mime, raw, note, doc_date, datetime.now().isoformat(timespec="seconds"))))
+    if stmts: run_many(stmts)
     return len(stmts)
 
 def show_attachment(att_id: int, width: int = 240) -> None:
-    df = query_df("SELECT name, mime, data FROM attachments WHERE id=?", (att_id,))
-    if df.empty:
-        return
+    username = st.session_state.get("current_user", "admin")
+    df = query_df("SELECT name, mime, data FROM attachments WHERE username=? AND id=?", (username, att_id))
+    if df.empty: return
     name, mime, data = df.name[0], df.mime[0], df.data[0]
-    if (mime or "").startswith("image/"):
-        st.image(data, width=width)
-    else:
-        st.download_button(f"📄 {name}", data=data, file_name=name, mime=mime, key=f"dl_{att_id}")
+    if (mime or "").startswith("image/"): st.image(data, width=width)
+    else: st.download_button(f"📄 {name}", data=data, file_name=name, mime=mime, key=f"dl_{att_id}")
 
 # ==========================================================
 # 4. التصميم والمكونات المشتركة
 # ==========================================================
-def fmt(x: float) -> str:
-    return f"{x:,.0f} {CUR}"
-
-def esc(x) -> str:
-    return html.escape(str(x))
+def fmt(x: float) -> str: return f"{x:,.0f} {CUR}"
+def esc(x) -> str: return html.escape(str(x))
 
 def num(label: str, value=None, step: float = 100.0, **kw):
-    """حقل رقم فارغ افتراضيًا (بدون 0.00). يرجع 0.0 لو ترك فارغًا."""
     v = st.number_input(label, min_value=0.0, value=value, step=step, format=NUM, **kw)
     return float(v or 0.0)
 
@@ -277,108 +280,52 @@ def inject_css() -> None:
 :root {{ --primary:{C_PRIMARY}; --deep:{C_DEEP}; --ink:{C_INK}; --muted:{C_MUTED}; --head:{C_HEAD};
         --bg:{C_BG}; --card:{C_CARD}; --line:{C_LINE}; --field:{C_FIELD};
         --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:{C_INCOME}; }}
-
-/* الخلفية السمني على كل الطبقات */
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-[data-testid="stHeader"], [data-testid="stBottom"] {{ background:var(--bg) !important; }}
-
-.stApp, .stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
-.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp [data-baseweb] {{ font-family:'Cairo',sans-serif !important; }}
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"], [data-testid="stBottom"] {{ background:var(--bg) !important; }}
+.stApp, .stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp [data-baseweb] {{ font-family:'Cairo',sans-serif !important; }}
 .stApp {{ direction:rtl; color:var(--ink); font-size:17px; color-scheme:light; }}
-
-/* الكتابة العادية سوداء */
-.stApp p, .stApp label, .stApp span, .stApp li, .stApp [data-testid="stCaptionContainer"],
-.stApp [data-testid="stMarkdownContainer"] {{ color:var(--ink); }}
-/* العناوين فقط بنية */
-.stApp h1, .stApp h2, .stApp h3, .stApp h4,
-.stApp h1 *, .stApp h2 *, .stApp h3 *, .stApp h4 * {{ color:var(--head); }}
-
+.stApp p, .stApp label, .stApp span, .stApp li, .stApp [data-testid="stCaptionContainer"], .stApp [data-testid="stMarkdownContainer"] {{ color:var(--ink); }}
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h1 *, .stApp h2 *, .stApp h3 *, .stApp h4 * {{ color:var(--head); }}
 .block-container {{ max-width:1320px; padding-top:1.2rem; padding-bottom:4rem; }}
 header[data-testid="stHeader"], section[data-testid="stSidebar"], footer {{ display:none !important; }}
 h1,h2,h3,h4,p,label,.stMarkdown {{ text-align:right; }}
-
-/* كل الحقول والقوائم: سمني فاتح ونص أسود، بدون أي جزء غامق */
-.stApp [data-baseweb="select"], .stApp [data-baseweb="select"] *,
-.stApp [data-baseweb="input"], .stApp [data-baseweb="input"] *,
-.stApp [data-baseweb="base-input"], .stApp [data-baseweb="base-input"] *,
-.stApp [data-baseweb="textarea"], .stApp [data-baseweb="textarea"] *,
-.stApp [data-testid="stDateInput"] *, .stApp [data-testid="stNumberInput"] *,
-.stApp [data-testid="stTextInput"] *, .stApp [data-testid="stSelectbox"] [data-baseweb] * {{
-    background-color:var(--field) !important; color:var(--ink) !important;
-    -webkit-text-fill-color:var(--ink) !important; }}
+.stApp [data-baseweb="select"], .stApp [data-baseweb="select"] *, .stApp [data-baseweb="input"], .stApp [data-baseweb="input"] *, .stApp [data-baseweb="base-input"], .stApp [data-baseweb="base-input"] *, .stApp [data-baseweb="textarea"], .stApp [data-baseweb="textarea"] *, .stApp [data-testid="stDateInput"] *, .stApp [data-testid="stNumberInput"] *, .stApp [data-testid="stTextInput"] *, .stApp [data-testid="stSelectbox"] [data-baseweb] * {{ background-color:var(--field) !important; color:var(--ink) !important; -webkit-text-fill-color:var(--ink) !important; }}
 .stApp [data-baseweb="select"] svg, .stApp [data-testid="stDateInput"] svg {{ fill:var(--ink) !important; color:var(--ink) !important; }}
-.stApp [data-baseweb="select"] > div, .stApp [data-baseweb="input"], .stApp [data-baseweb="textarea"] {{
-    border:1px solid var(--line) !important; border-radius:12px !important; }}
+.stApp [data-baseweb="select"] > div, .stApp [data-baseweb="input"], .stApp [data-baseweb="textarea"] {{ border:1px solid var(--line) !important; border-radius:12px !important; }}
 .stApp input, .stApp textarea {{ font-size:17px !important; }}
-.stApp input::placeholder, .stApp textarea::placeholder {{
-    color:#8d7f55 !important; -webkit-text-fill-color:#8d7f55 !important; opacity:1; }}
+.stApp input::placeholder, .stApp textarea::placeholder {{ color:#8d7f55 !important; -webkit-text-fill-color:#8d7f55 !important; opacity:1; }}
 button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStepDown"] {{ display:none !important; }}
-
-/* القوائم المنسدلة والتقويم */
-div[data-baseweb="popover"], div[data-baseweb="popover"] *, ul[role="listbox"], ul[role="listbox"] *,
-div[data-baseweb="calendar"], div[data-baseweb="calendar"] *, div[data-baseweb="menu"], div[data-baseweb="menu"] * {{
-    background-color:var(--field) !important; color:var(--ink) !important; }}
-li[role="option"]:hover, li[role="option"][aria-selected="true"],
-div[data-baseweb="calendar"] [aria-selected="true"] {{ background-color:#efe0b3 !important; }}
-
-/* مربعات الاختيار */
-.stApp label[data-baseweb="checkbox"] > span:first-child {{
-    background-color:var(--field) !important; border:2px solid #8d7f55 !important; border-radius:6px; }}
-.stApp label[data-baseweb="checkbox"]:has(input:checked) > span:first-child {{
-    background-color:var(--primary) !important; border-color:var(--primary) !important; }}
-
-/* رفع الملفات */
-[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploaderDropzone"] * {{
-    background-color:var(--field) !important; color:var(--ink) !important; }}
+div[data-baseweb="popover"], div[data-baseweb="popover"] *, ul[role="listbox"], ul[role="listbox"] *, div[data-baseweb="calendar"], div[data-baseweb="calendar"] *, div[data-baseweb="menu"], div[data-baseweb="menu"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
+li[role="option"]:hover, li[role="option"][aria-selected="true"], div[data-baseweb="calendar"] [aria-selected="true"] {{ background-color:#efe0b3 !important; }}
+.stApp label[data-baseweb="checkbox"] > span:first-child {{ background-color:var(--field) !important; border:2px solid #8d7f55 !important; border-radius:6px; }}
+.stApp label[data-baseweb="checkbox"]:has(input:checked) > span:first-child {{ background-color:var(--primary) !important; border-color:var(--primary) !important; }}
+[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploaderDropzone"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
 [data-testid="stFileUploaderDropzone"] {{ border:1px dashed var(--line) !important; border-radius:14px !important; }}
 [data-testid="stFileUploaderDropzone"] button {{ background-color:var(--card) !important; border:1px solid var(--line) !important; }}
 [data-testid="stFileUploaderFile"], [data-testid="stFileUploaderFile"] * {{ background-color:transparent !important; color:var(--ink) !important; }}
-
-/* رسائل التنبيه والتوست */
 .stApp [data-testid="stAlert"] {{ background-color:#f1e5b8 !important; border:1px solid var(--line); border-radius:14px; }}
 .stApp [data-testid="stAlert"] * {{ background-color:transparent !important; color:var(--ink) !important; }}
 [data-testid="stToast"], [data-testid="stToast"] * {{ background-color:var(--card) !important; color:var(--ink) !important; }}
-
-/* التبويبات */
 .stApp button[data-baseweb="tab"] {{ background:transparent !important; }}
-.stApp button[data-baseweb="tab"][aria-selected="true"], .stApp button[data-baseweb="tab"][aria-selected="true"] * {{
-    color:var(--primary) !important; font-weight:800; }}
+.stApp button[data-baseweb="tab"][aria-selected="true"], .stApp button[data-baseweb="tab"][aria-selected="true"] * {{ color:var(--primary) !important; font-weight:800; }}
 .stApp div[data-baseweb="tab-highlight"] {{ background:var(--primary) !important; }}
 .stApp div[data-baseweb="tab-border"] {{ background:var(--line) !important; }}
-
-/* الأزرار */
-.stApp button[data-testid^="stBaseButton-secondary"] {{
-    background:var(--card) !important; border:1px solid var(--line) !important; color:var(--ink) !important; }}
+.stApp button[data-testid^="stBaseButton-secondary"] {{ background:var(--card) !important; border:1px solid var(--line) !important; color:var(--ink) !important; }}
 .stApp button[data-testid^="stBaseButton-secondary"] * {{ color:var(--ink) !important; }}
-.stApp button[data-testid^="stBaseButton-primary"] {{
-    background:var(--primary) !important; border:1px solid var(--primary) !important; }}
-.stApp button[data-testid^="stBaseButton-primary"], .stApp button[data-testid^="stBaseButton-primary"] * {{
-    color:#fff !important; }}
-.stApp .stButton > button, .stApp .stDownloadButton > button, .stApp [data-testid="stFormSubmitButton"] > button {{
-    border-radius:12px; font-weight:700; padding:8px 22px; }}
+.stApp button[data-testid^="stBaseButton-primary"] {{ background:var(--primary) !important; border:1px solid var(--primary) !important; }}
+.stApp button[data-testid^="stBaseButton-primary"], .stApp button[data-testid^="stBaseButton-primary"] * {{ color:#fff !important; }}
+.stApp .stButton > button, .stApp .stDownloadButton > button, .stApp [data-testid="stFormSubmitButton"] > button {{ border-radius:12px; font-weight:700; padding:8px 22px; }}
 .stApp .stButton > button:hover, .stApp .stDownloadButton > button:hover {{ filter:brightness(.96); }}
-
-/* شريط التنقل: أزرار كبيرة ومتباعدة */
-.st-key-topnav {{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 16px;
-    box-shadow:0 2px 10px rgba(90,62,43,.08); }}
+.st-key-topnav {{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 16px; box-shadow:0 2px 10px rgba(90,62,43,.08); }}
 .st-key-topnav [data-testid="stHorizontalBlock"] {{ gap:14px !important; }}
-.st-key-topnav button {{ min-height:58px; width:100%; font-size:16px !important; font-weight:800 !important;
-    border-radius:14px !important; padding:6px 10px !important; line-height:1.4; }}
+.st-key-topnav button {{ min-height:58px; width:100%; font-size:16px !important; font-weight:800 !important; border-radius:14px !important; padding:6px 10px !important; line-height:1.4; }}
 .st-key-topnav button p {{ font-size:16px !important; font-weight:800 !important; margin:0; }}
-
-/* ترويسة الصفحة: أخضر ونص أبيض */
-.app-header {{ background:linear-gradient(120deg,#073b30,#0b5d4b);
-    padding:26px 32px; border-radius:20px; margin:18px 0 22px; }}
+.app-header {{ background:linear-gradient(120deg,#073b30,#0b5d4b); padding:26px 32px; border-radius:20px; margin:18px 0 22px; }}
 .stApp .app-header, .stApp .app-header * {{ color:#fff !important; }}
 .app-header h1 {{ margin:0; font-size:2rem; font-weight:800; }}
 .app-header p {{ margin:6px 0 0; opacity:.9; font-size:1.05rem; }}
-
-/* بطاقات المؤشرات */
-.kpi {{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 20px;
-    margin-bottom:12px; height:calc(100% - 12px); position:relative; overflow:hidden; }}
+.kpi {{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 20px; margin-bottom:12px; height:calc(100% - 12px); position:relative; overflow:hidden; }}
 .kpi::before {{ content:""; position:absolute; top:0; right:0; width:5px; height:100%; background:var(--primary); }}
-.kpi.good::before {{ background:var(--good); }} .kpi.bad::before {{ background:var(--bad); }}
-.kpi.warn::before {{ background:var(--accent); }}
+.kpi.good::before {{ background:var(--good); }} .kpi.bad::before {{ background:var(--bad); }} .kpi.warn::before {{ background:var(--accent); }}
 .kpi-label {{ font-size:.95rem; color:var(--muted); font-weight:600; }}
 .kpi-value {{ font-size:1.7rem; font-weight:800; line-height:1.5; color:var(--ink); }}
 .kpi-sub {{ font-size:.88rem; color:var(--muted); min-height:1.2em; }}
@@ -386,34 +333,21 @@ div[data-baseweb="calendar"] [aria-selected="true"] {{ background-color:#efe0b3 
 .kpi.hero::before {{ display:none; }}
 .stApp .kpi.hero, .stApp .kpi.hero * {{ color:#fff !important; }}
 .kpi.hero .kpi-value {{ font-size:2.1rem; }}
-
-.stApp .section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px;
-    border-right:4px solid var(--accent); color:var(--head); }}
-
-/* شريط التقدم */
+.stApp .section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px; border-right:4px solid var(--accent); color:var(--head); }}
 .bar-row {{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 16px; margin-bottom:10px; }}
 .bar-head {{ display:flex; justify-content:space-between; font-weight:700; margin-bottom:8px; }}
 .stApp .bar-head span:first-child {{ color:var(--ink); }}
 .stApp .bar-head span:last-child {{ color:var(--muted); font-weight:600; font-size:.92rem; }}
 .bar-track {{ background:#eadcb0; border-radius:99px; height:10px; overflow:hidden; }}
 .bar-fill {{ height:100%; border-radius:99px; }}
-
-.tip {{ background:#f8e9bd; border:1px solid #e6cd86; border-right:5px solid var(--accent);
-    border-radius:14px; padding:12px 16px; margin:8px 0; }}
-
-/* الجداول */
+.tip {{ background:#f8e9bd; border:1px solid #e6cd86; border-right:5px solid var(--accent); border-radius:14px; padding:12px 16px; margin:8px 0; }}
 .tbl-wrap {{ max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:var(--card); }}
 .tbl {{ width:100%; border-collapse:collapse; font-size:15px; direction:rtl; }}
-.tbl th {{ position:sticky; top:0; background:#ecdcae; color:var(--head); text-align:right;
-    padding:10px 14px; font-weight:800; }}
+.tbl th {{ position:sticky; top:0; background:#ecdcae; color:var(--head); text-align:right; padding:10px 14px; font-weight:800; }}
 .tbl td {{ padding:9px 14px; border-top:1px solid var(--line); color:var(--ink); text-align:right; }}
 .tbl tr:hover td {{ background:#f6ebc9; }}
-
-/* النماذج والحاويات والـ expander */
-div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {{
-    background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
-div[data-testid="stExpander"], div[data-testid="stExpander"] details,
-div[data-testid="stExpander"] summary {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
+div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
+div[data-testid="stExpander"], div[data-testid="stExpander"] details, div[data-testid="stExpander"] summary {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
 div[data-testid="stExpander"] summary, div[data-testid="stExpander"] summary * {{ color:var(--ink) !important; }}
 @media (max-width:760px) {{ .kpi-value {{ font-size:1.35rem; }} .app-header {{ padding:18px; }} }}
 </style>""", unsafe_allow_html=True)
@@ -422,18 +356,27 @@ def set_page(key: str) -> None:
     st.session_state["current_page"] = key
 
 def _stretch(fn, *args, **kwargs):
-    try:
-        return fn(*args, width="stretch", **kwargs)
-    except TypeError:
-        return fn(*args, use_container_width=True, **kwargs)
+    try: return fn(*args, width="stretch", **kwargs)
+    except TypeError: return fn(*args, use_container_width=True, **kwargs)
 
 def render_top_nav() -> None:
     ss = st.session_state
     if ss.get("current_page") not in PAGES:
         ss["current_page"] = "dashboard"
+    
+    pages_list = list(PAGES.items())
+    row1 = pages_list[:3]
+    row2 = pages_list[3:]
+    
     with st.container(key="topnav"):
-        cols = st.columns(len(PAGES), gap="medium")
-        for col, (key, label) in zip(cols, PAGES.items()):
+        cols1 = st.columns(3, gap="medium")
+        for col, (key, label) in zip(cols1, row1):
+            _stretch(col.button, label, key=f"nav_{key}",
+                     type="primary" if ss["current_page"] == key else "secondary",
+                     on_click=set_page, args=(key,))
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+        cols2 = st.columns(3, gap="medium")
+        for col, (key, label) in zip(cols2, row2):
             _stretch(col.button, label, key=f"nav_{key}",
                      type="primary" if ss["current_page"] == key else "secondary",
                      on_click=set_page, args=(key,))
@@ -446,8 +389,7 @@ def kpi(label: str, value: str, sub: str = "", tone: str = "") -> None:
     tone = "hero" if tone == "main" else tone
     style = ' style="background:linear-gradient(135deg,#073b30,#0b5d4b);color:#fff"' if tone == "hero" else ""
     st.markdown(f'<div class="kpi {tone}"{style}><div class="kpi-label">{esc(label)}</div>'
-                f'<div class="kpi-value">{esc(value)}</div><div class="kpi-sub">{esc(sub)}</div></div>',
-                unsafe_allow_html=True)
+                f'<div class="kpi-value">{esc(value)}</div><div class="kpi-sub">{esc(sub)}</div></div>', unsafe_allow_html=True)
 
 def section(title: str) -> None:
     st.markdown(f'<div class="section-title">{esc(title)}</div>', unsafe_allow_html=True)
@@ -457,8 +399,7 @@ def progress_bar(title: str, used: float, limit: float, right_note: str = "") ->
     color = C_INCOME if pct < 80 else C_ACCENT if pct < 100 else C_EXPENSE
     note = right_note or f"{fmt(used)} من {fmt(limit)} ({pct:.0f}%)"
     st.markdown(f'<div class="bar-row"><div class="bar-head"><span>{esc(title)}</span><span>{esc(note)}</span></div>'
-                f'<div class="bar-track"><div class="bar-fill" style="width:{min(pct, 100):.1f}%;background:{color}"></div>'
-                f'</div></div>', unsafe_allow_html=True)
+                f'<div class="bar-track"><div class="bar-fill" style="width:{min(pct, 100):.1f}%;background:{color}"></div></div></div>', unsafe_allow_html=True)
 
 def tip(text: str) -> None:
     st.markdown(f'<div class="tip">💡 {esc(text)}</div>', unsafe_allow_html=True)
@@ -468,12 +409,10 @@ def rate_tone(rate: float) -> str:
 
 def html_table(df: pd.DataFrame, max_rows: int = 300) -> None:
     head = "".join(f"<th>{esc(c)}</th>" for c in df.columns)
-    rows = "".join("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>"
-                   for r in df.head(max_rows).itertuples(index=False))
-    st.markdown(f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{head}</tr></thead>'
-                f'<tbody>{rows}</tbody></table></div>', unsafe_allow_html=True)
+    rows = "".join("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>" for r in df.head(max_rows).itertuples(index=False))
+    st.markdown(f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>', unsafe_allow_html=True)
     if len(df) > max_rows:
-        st.caption(f"يعرض أحدث {max_rows} عملية من {len(df)}. استخدم البحث أو اختر شهرًا لتضييق النتائج.")
+        st.caption(f"يعرض أحدث {max_rows} عملية من {len(df)}.")
 
 def show_chart(chart) -> None:
     chart = (chart.configure(background="transparent")
@@ -493,8 +432,7 @@ def year_picker(key: str, col=None) -> int:
 def month_picker(key: str, col=None, allow_all: bool = False) -> int:
     opts = ([0] if allow_all else []) + list(range(1, 13))
     default = 0 if allow_all else date.today().month - 1
-    return (col or st).selectbox("الشهر", opts, index=default, key=key,
-                                 format_func=lambda i: "كل الأشهر" if i == 0 else MONTHS_AR[i - 1])
+    return (col or st).selectbox("الشهر", opts, index=default, key=key, format_func=lambda i: "كل الأشهر" if i == 0 else MONTHS_AR[i - 1])
 
 def category_input(label: str, key: str, current: str = ""):
     if current and key not in st.session_state:
@@ -507,42 +445,88 @@ def category_input(label: str, key: str, current: str = ""):
 
 def donut(df: pd.DataFrame):
     return (alt.Chart(df).mark_arc(innerRadius=62, outerRadius=122, cornerRadius=4)
-            .encode(theta="amount:Q",
-                    color=alt.Color("category:N", legend=alt.Legend(title=None, orient="bottom"),
-                                    scale=alt.Scale(scheme="tableau10")),
-                    tooltip=[alt.Tooltip("category:N", title="التصنيف"),
-                             alt.Tooltip("amount:Q", title="المبلغ", format=",.0f")])
+            .encode(theta="amount:Q", color=alt.Color("category:N", legend=alt.Legend(title=None, orient="bottom"), scale=alt.Scale(scheme="tableau10")),
+                    tooltip=[alt.Tooltip("category:N", title="التصنيف"), alt.Tooltip("amount:Q", title="المبلغ", format=",.0f")])
             .properties(height=330))
 
-def ensure_profile() -> None:
-    if get_setting("user_name"):
-        return
-    page_header("👋 أهلاً بك في نظامك المالي", "اكتب اسمك وابدأ تسجيل أول مصروف في أقل من دقيقة")
-    with st.form("welcome"):
-        name = st.text_input("اسم المستخدم")
-        saved0 = num("المبلغ المدخر بالفعل (اختياري)", step=1000.0)
-        ok = st.form_submit_button("ابدأ الاستخدام", type="primary")
-    if ok:
-        if name.strip():
-            set_setting("user_name", name.strip())
-            if saved0 > 0:
-                run("INSERT INTO fin_details(kind, name, amount, note) VALUES('مدخرات','مدخرات قبل البدء',?,'')",
-                    (saved0,))
-            st.rerun()
-        else:
-            st.error("اكتب اسمك للمتابعة.")
-    st.stop()
+# ==========================================================
+# 5. نظام المصادقة (Authentication)
+# ==========================================================
+def register_user(username: str, password: str) -> bool:
+    if not username.strip() or not password.strip():
+        return False, "اسم المستخدم وكلمة المرور مطلوبان."
+    if len(username) < 3:
+        return False, "اسم المستخدم يجب أن يكون 3 أحرف على الأقل."
+    
+    with _lock:
+        conn = get_conn()
+        exists = conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
+        if exists:
+            return False, "اسم المستخدم هذا موجود بالفعل، اختر اسماً آخر."
+        
+        hashed = hash_password(password)
+        conn.execute("INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                     (username, hashed, datetime.now().isoformat()))
+        conn.commit()
+    return True, "تم إنشاء الحساب بنجاح! يمكنك تسجيل الدخول الآن."
+
+def login_user(username: str, password: str) -> bool:
+    hashed = hash_password(password)
+    with _lock:
+        conn = get_conn()
+        user = conn.execute("SELECT username FROM users WHERE username=? AND password_hash=?", (username, hashed)).fetchone()
+        return bool(user)
+
+def render_auth_page() -> None:
+    st.markdown("<div style='text-align:center; margin-top: 50px;'>", unsafe_allow_html=True)
+    st.markdown("<h1 style='color:#0b5d4b; font-size: 2.5rem;'>💰 نظامي المالي الشخصي</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#4a4a4a; font-size: 1.2rem;'>أدخل بياناتك للوصول إلى لوحة تحكمك المالية</p>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["🔑 تسجيل الدخول", "📝 إنشاء حساب جديد"])
+    
+    with tab1:
+        with st.form("login_form"):
+            username = st.text_input("اسم المستخدم", key="login_user")
+            password = st.text_input("كلمة المرور", type="password", key="login_pass")
+            submitted = st.form_submit_button("دخول", type="primary", use_container_width=True)
+            
+            if submitted:
+                if login_user(username, password):
+                    st.session_state["logged_in"] = True
+                    st.session_state["current_user"] = username
+                    st.session_state["current_page"] = "dashboard"
+                    st.rerun()
+                else:
+                    st.error("اسم المستخدم أو كلمة المرور غير صحيحة.")
+                    
+    with tab2:
+        with st.form("register_form"):
+            new_username = st.text_input("اسم المستخدم الجديد", key="reg_user")
+            new_password = st.text_input("كلمة المرور", type="password", key="reg_pass")
+            confirm_password = st.text_input("تأكيد كلمة المرور", type="password", key="reg_confirm")
+            submitted = st.form_submit_button("إنشاء الحساب", type="primary", use_container_width=True)
+            
+            if submitted:
+                if new_password != confirm_password:
+                    st.error("كلمتا المرور غير متطابقتين.")
+                else:
+                    success, msg = register_user(new_username, new_password)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
 
 # ==========================================================
-# 5. نماذج المصاريف
+# 6. نماذج المصاريف والصفحات (محدثة لتشمل username)
 # ==========================================================
 def render_expense_form(scope: str) -> None:
+    username = st.session_state.get("current_user", "admin")
     ss = st.session_state
     nonce = ss.setdefault(f"nonce_{scope}", 0)
     def k(n): return f"{scope}_{n}_{nonce}"
 
-    files = st.file_uploader("📎 ارفع فاتورة أو سكرين رسالة بنك (اختياري)", type=FILE_TYPES,
-                             accept_multiple_files=True, key=k("files"))
+    files = st.file_uploader("📎 ارفع فاتورة أو سكرين رسالة بنك (اختياري)", type=FILE_TYPES, accept_multiple_files=True, key=k("files"))
     if files:
         st.selectbox("نوع المستند", DOC_KINDS, key=k("kind"))
     a, b = st.columns(2)
@@ -559,18 +543,17 @@ def render_expense_form(scope: str) -> None:
             st.error("أدخل مبلغًا أكبر من صفر.")
             return
         cat_final = (cat or "").strip() or "أخرى"
-        eid = run("INSERT INTO daily_expenses (year, month, day, expense_date, amount, details, category) "
-                  "VALUES (?,?,?,?,?,?,?)",
-                  (d.year, d.month, d.day, d.isoformat(), amount, details.strip() or cat_final, cat_final))
+        eid = run("INSERT INTO daily_expenses (username, year, month, day, expense_date, amount, details, category) VALUES (?,?,?,?,?,?,?,?)",
+                  (username, d.year, d.month, d.day, d.isoformat(), amount, details.strip() or cat_final, cat_final))
         n = save_attachments(files, ss.get(k("kind"), DOC_KINDS[0]), eid, d.isoformat())
         ss[f"nonce_{scope}"] = nonce + 1
         flash(f"✅ تمت إضافة {fmt(amount)} ({cat_final})" + (f" مع {n} مرفق" if n else ""))
         st.rerun()
 
 def render_edit_panel(eid: int) -> None:
-    df = query_df("SELECT * FROM daily_expenses WHERE id=?", (eid,))
-    if df.empty:
-        return
+    username = st.session_state.get("current_user", "admin")
+    df = query_df("SELECT * FROM daily_expenses WHERE username=? AND id=?", (username, eid))
+    if df.empty: return
     r, k = df.iloc[0], f"edit_{eid}"
     with st.container(border=True):
         section("✏️ تعديل المصروف")
@@ -583,7 +566,7 @@ def render_edit_panel(eid: int) -> None:
             amount = num("المبلغ (ج.م)", value=float(r.amount), step=10.0, key=f"{k}_amount")
         details = e.text_input("التفاصيل", value=r.details or "", key=f"{k}_details")
 
-        atts = query_df("SELECT id, kind, name FROM attachments WHERE expense_id=?", (eid,))
+        atts = query_df("SELECT id, kind, name FROM attachments WHERE username=? AND expense_id=?", (username, eid))
         to_delete = []
         if not atts.empty:
             st.write("**المرفقات الحالية:**")
@@ -593,8 +576,7 @@ def render_edit_panel(eid: int) -> None:
                     show_attachment(int(at.id), width=200)
                     if st.checkbox(f"حذف ({at.kind})", key=f"{k}_delatt_{at.id}"):
                         to_delete.append(int(at.id))
-        new_files = st.file_uploader("📎 إضافة مرفقات جديدة", type=FILE_TYPES,
-                                     accept_multiple_files=True, key=f"{k}_newfiles")
+        new_files = st.file_uploader("📎 إضافة مرفقات جديدة", type=FILE_TYPES, accept_multiple_files=True, key=f"{k}_newfiles")
         kind = st.selectbox("نوع المستند", DOC_KINDS, key=f"{k}_kind") if new_files else DOC_KINDS[0]
 
         s1, s2 = st.columns(2)
@@ -603,11 +585,9 @@ def render_edit_panel(eid: int) -> None:
                 st.error("المبلغ يجب أن يكون أكبر من صفر.")
             else:
                 cat_final = (cat or "").strip() or "أخرى"
-                stmts = [("UPDATE daily_expenses SET year=?, month=?, day=?, expense_date=?, amount=?, "
-                          "details=?, category=? WHERE id=?",
-                          (d.year, d.month, d.day, d.isoformat(), amount,
-                           details.strip() or cat_final, cat_final, eid))]
-                stmts += [("DELETE FROM attachments WHERE id=?", (i,)) for i in to_delete]
+                stmts = [("UPDATE daily_expenses SET year=?, month=?, day=?, expense_date=?, amount=?, details=?, category=? WHERE username=? AND id=?",
+                          (d.year, d.month, d.day, d.isoformat(), amount, details.strip() or cat_final, cat_final, username, eid))]
+                stmts += [("DELETE FROM attachments WHERE username=? AND id=?", (username, i)) for i in to_delete]
                 run_many(stmts)
                 save_attachments(new_files, kind, eid, d.isoformat())
                 flash("✅ تم حفظ التعديلات.")
@@ -615,23 +595,21 @@ def render_edit_panel(eid: int) -> None:
         with s2:
             if st.checkbox("أؤكد حذف هذا المصروف ومرفقاته", key=f"{k}_confirm"):
                 if st.button("🗑️ حذف المصروف", key=f"{k}_del"):
-                    run_many([("DELETE FROM attachments WHERE expense_id=?", (eid,)),
-                              ("DELETE FROM daily_expenses WHERE id=?", (eid,))])
+                    run_many([("DELETE FROM attachments WHERE username=? AND expense_id=?", (username, eid)),
+                              ("DELETE FROM daily_expenses WHERE username=? AND id=?", (username, eid))])
                     flash("🗑️ تم حذف المصروف.")
                     st.rerun()
 
-# ==========================================================
-# 6. الصفحات
-# ==========================================================
 def carry_forward(year: int, month: int, amount: float, note: str) -> None:
-    run("INSERT INTO monthly_data (year, month, basic_salary, cash_income, opening_balance, carry_note) "
-        "VALUES (?,?,0,0,?,?) ON CONFLICT(year, month) DO UPDATE SET "
-        "opening_balance=excluded.opening_balance, carry_note=excluded.carry_note", (year, month, amount, note))
+    username = st.session_state.get("current_user", "admin")
+    run("INSERT INTO monthly_data (username, year, month, basic_salary, cash_income, opening_balance, carry_note) "
+        "VALUES (?,?,?,?,?,?,?) ON CONFLICT(username, year, month) DO UPDATE SET "
+        "opening_balance=excluded.opening_balance, carry_note=excluded.carry_note", 
+        (username, year, month, 0, 0, amount, note))
     flash(f"✅ تم ترحيل {fmt(amount)} إلى هذا الشهر.")
 
 def render_insights(year: int, month: int, s: dict, prev: dict) -> None:
-    if s["expenses"] <= 0:
-        return
+    if s["expenses"] <= 0: return
     ins = month_insights(year, month, s, prev)
     section("🧠 قراءة ذكية لشهرك")
     c = st.columns(4)
@@ -639,20 +617,14 @@ def render_insights(year: int, month: int, s: dict, prev: dict) -> None:
     with c[1]:
         if ins["is_current"]:
             over = ins["projected"] > s["income"] > 0
-            kpi("توقع إجمالي الشهر", fmt(ins["projected"]),
-                "فوق دخلك!" if over else "بنفس الوتيرة الحالية", "bad" if over else "")
+            kpi("توقع إجمالي الشهر", fmt(ins["projected"]), "فوق دخلك!" if over else "بنفس الوتيرة الحالية", "bad" if over else "")
         else:
             kpi("إجمالي الشهر", fmt(s["expenses"]), "شهر مكتمل")
     with c[2]:
-        if ins["top"]:
-            kpi("أكثر تصنيف صرفًا", cat_label(ins["top"][0]), fmt(ins["top"][1]), "warn")
+        if ins["top"]: kpi("أكثر تصنيف صرفًا", cat_label(ins["top"][0]), fmt(ins["top"][1]), "warn")
     with c[3]:
-        if ins["change"] is None:
-            kpi("مقارنة بالشهر السابق", "—", "لا توجد بيانات سابقة")
-        else:
-            kpi("مقارنة بالشهر السابق", f"{ins['change']:+.0f}%",
-                "المصروف ارتفع" if ins["change"] > 0 else "المصروف انخفض",
-                "bad" if ins["change"] > 0 else "good")
+        if ins["change"] is None: kpi("مقارنة بالشهر السابق", "—", "لا توجد بيانات سابقة")
+        else: kpi("مقارنة بالشهر السابق", f"{ins['change']:+.0f}%", "المصروف ارتفع" if ins["change"] > 0 else "المصروف انخفض", "bad" if ins["change"] > 0 else "good")
     if s["income"] > 0 and s["rate"] < 10:
         tip(f"نسبة ادخارك {s['rate']:.1f}% فقط. جرّب هدف 20% ببدء الشهر بتحويل مبلغ ثابت للمدخرات.")
     if ins["needs_pct"] > 0:
@@ -660,19 +632,18 @@ def render_insights(year: int, month: int, s: dict, prev: dict) -> None:
 
 def render_budget_status(year: int, month: int) -> None:
     budgets = {c: v for c, v in get_budgets().items() if v and v > 0}
-    if not budgets:
-        return
+    if not budgets: return
     section("🎯 الميزانيات هذا الشهر")
     cats = category_totals(year, month)
     spent = dict(zip(cats.category, cats.amount))
     over = [c for c, lim in budgets.items() if float(spent.get(c, 0)) > lim]
-    if over:
-        st.error("تجاوزت الميزانية في: " + "، ".join(over))
+    if over: st.error("تجاوزت الميزانية في: " + "، ".join(over))
     for c, lim in sorted(budgets.items(), key=lambda x: -float(spent.get(x[0], 0)) / x[1]):
         progress_bar(cat_label(c), float(spent.get(c, 0)), lim)
 
 def page_dashboard() -> None:
-    page_header(f"أهلاً {get_setting('user_name')} 👋", "هذه صورة وضعك المالي الآن")
+    username = st.session_state.get("current_user", "admin")
+    page_header(f"أهلاً {get_setting('user_name') or username} 👋", "هذه صورة وضعك المالي الآن")
     c1, c2, _ = st.columns([1, 1, 2])
     year, month = year_picker("dash_year", c1), month_picker("dash_month", c2)
     s = month_summary(year, month)
@@ -686,8 +657,7 @@ def page_dashboard() -> None:
         b.button("🔁 رحّل الرصيد", on_click=carry_forward, args=(year, month, prev["closing"], note))
 
     sub_in = f"راتب {s['salary']:,.0f} + إضافي {s['cash']:,.0f}"
-    if s["received_n"]:
-        sub_in += f" + مقبوضات {s['received']:,.0f}"
+    if s["received_n"]: sub_in += f" + مقبوضات {s['received']:,.0f}"
     c = st.columns([1.3, 1, 1, 1, 1])
     with c[0]: kpi("متبقي معك", fmt(s["closing"]), "المرحل + المستلم − المصروف", "main")
     with c[1]: kpi("استلمت", fmt(s["income"]), sub_in, "good")
@@ -721,49 +691,41 @@ def page_dashboard() -> None:
         long = data[["name", "income", "expenses"]].melt("name", var_name="type", value_name="amount")
         long["type"] = long["type"].map({"income": "استلمت", "expenses": "صرفت"})
         ch = (alt.Chart(long).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5)
-              .encode(x=alt.X("name:N", sort=MONTHS_AR, title=None), xOffset="type:N",
-                      y=alt.Y("amount:Q", title=None),
-                      color=alt.Color("type:N", legend=alt.Legend(title=None, orient="top"),
-                                      scale=alt.Scale(domain=["استلمت", "صرفت"], range=[C_INCOME, C_EXPENSE])),
-                      tooltip=[alt.Tooltip("name:N", title="الشهر"), alt.Tooltip("type:N", title="النوع"),
-                               alt.Tooltip("amount:Q", title="المبلغ", format=",.0f")])
+              .encode(x=alt.X("name:N", sort=MONTHS_AR, title=None), xOffset="type:N", y=alt.Y("amount:Q", title=None),
+                      color=alt.Color("type:N", legend=alt.Legend(title=None, orient="top"), scale=alt.Scale(domain=["استلمت", "صرفت"], range=[C_INCOME, C_EXPENSE])),
+                      tooltip=[alt.Tooltip("name:N", title="الشهر"), alt.Tooltip("type:N", title="النوع"), alt.Tooltip("amount:Q", title="المبلغ", format=",.0f")])
               .properties(height=330))
         show_chart(ch)
     with right:
         section(f"مصاريف {MONTHS_AR[month - 1]} حسب التصنيف")
         cats = category_totals(year, month)
-        if cats.empty:
-            st.info("لا توجد مصاريف لهذا الشهر بعد.")
-        else:
-            show_chart(donut(cats))
+        if cats.empty: st.info("لا توجد مصاريف لهذا الشهر بعد.")
+        else: show_chart(donut(cats))
 
-    daily = query_df("SELECT day, SUM(amount) AS amount FROM daily_expenses WHERE year=? AND month=? "
-                     "GROUP BY day ORDER BY day", (year, month))
+    daily = query_df("SELECT day, SUM(amount) AS amount FROM daily_expenses WHERE username=? AND year=? AND month=? GROUP BY day ORDER BY day", (username, year, month))
     if not daily.empty:
         section("📈 تراكم المصروف خلال الشهر")
         daily["cum"] = daily["amount"].cumsum()
         base = alt.Chart(daily).encode(x=alt.X("day:Q", title="اليوم"), y=alt.Y("cum:Q", title=None),
-                                       tooltip=[alt.Tooltip("day:Q", title="اليوم"),
-                                                alt.Tooltip("cum:Q", title="التراكم", format=",.0f")])
+                                       tooltip=[alt.Tooltip("day:Q", title="اليوم"), alt.Tooltip("cum:Q", title="التراكم", format=",.0f")])
         layers = base.mark_area(opacity=.18, color=C_EXPENSE) + base.mark_line(color=C_EXPENSE, point=True)
         if s["income"] > 0:
-            layers += alt.Chart(pd.DataFrame({"y": [s["income"]]})).mark_rule(
-                color=C_INCOME, strokeDash=[6, 4]).encode(y="y:Q")
+            layers += alt.Chart(pd.DataFrame({"y": [s["income"]]})).mark_rule(color=C_INCOME, strokeDash=[6, 4]).encode(y="y:Q")
         show_chart(layers.properties(height=280))
         if s["income"] > 0:
             st.caption("الخط المتقطع الأخضر = دخلك هذا الشهر. عندما يلمسه الخط الأحمر فقد صرفت كل دخلك.")
 
 def page_expenses() -> None:
+    username = st.session_state.get("current_user", "admin")
     page_header("💸 سجل المصاريف", "إضافة وتعديل وبحث في مصاريفك اليومية")
     tab1, tab2 = st.tabs(["➕ إضافة مصروف جديد", "📋 قائمة المصاريف"])
-    with tab1:
-        render_expense_form("page_exp")
+    with tab1: render_expense_form("page_exp")
     with tab2:
         c1, c2, c3 = st.columns([1, 1, 2])
         y, m = year_picker("exp_y", c1), month_picker("exp_m", c2, allow_all=True)
         query = c3.text_input("🔎 بحث بالتفاصيل أو التصنيف", key="exp_q")
 
-        sql, params = "SELECT id, expense_date, amount, details, category FROM daily_expenses WHERE year=? ", [y]
+        sql, params = "SELECT id, expense_date, amount, details, category FROM daily_expenses WHERE username=? AND year=? ", [username, y]
         if m > 0:
             sql += "AND month=? "
             params.append(m)
@@ -777,19 +739,18 @@ def page_expenses() -> None:
 
         x1, x2 = st.columns([3, 1])
         x1.write(f"**الإجمالي:** {fmt(df.amount.sum())} — {len(df)} عملية")
-        x2.download_button("⬇️ تصدير CSV", df.to_csv(index=False).encode("utf-8-sig"),
-                           "expenses.csv", "text/csv")
+        x2.download_button("⬇️ تصدير CSV", df.to_csv(index=False).encode("utf-8-sig"), "expenses.csv", "text/csv")
         shown = df.copy()
         shown["amount"] = shown["amount"].map(fmt)
         shown.columns = ["م", "التاريخ", "المبلغ", "التفاصيل", "التصنيف"]
         html_table(shown)
 
         sel = st.selectbox("اختر العملية للتعديل أو الحذف", df["id"].tolist(),
-                           format_func=lambda i: f"#{i} — {df.loc[df.id == i, 'details'].iloc[0]} "
-                                                 f"({fmt(df.loc[df.id == i, 'amount'].iloc[0])})")
+                           format_func=lambda i: f"#{i} — {df.loc[df.id == i, 'details'].iloc[0]} ({fmt(df.loc[df.id == i, 'amount'].iloc[0])})")
         render_edit_panel(sel)
 
 def page_monthly_details() -> None:
+    username = st.session_state.get("current_user", "admin")
     page_header("📅 الدخل الشهري", "الراتب والدخل الإضافي والرصيد المرحل")
     c1, c2 = st.columns(2)
     y, m = year_picker("m_det_y", c1), month_picker("m_det_m", c2)
@@ -798,50 +759,44 @@ def page_monthly_details() -> None:
     section(f"بيانات شهر {MONTHS_AR[m - 1]} {y}")
     with st.form(f"monthly_form_{y}_{m}"):
         col1, col2 = st.columns(2)
-        with col1:
-            sal = num("الراتب الأساسي", value=s["salary"] or None, step=500.0)
-        with col2:
-            cash = num("دخل كاش / إضافي", value=s["cash"] or None, step=500.0)
+        with col1: sal = num("الراتب الأساسي", value=s["salary"] or None, step=500.0)
+        with col2: cash = num("دخل كاش / إضافي", value=s["cash"] or None, step=500.0)
         col3, col4 = st.columns(2)
-        with col3:
-            opening = num("رصيد مرحل من الشهر السابق", value=s["opening"] or None, step=500.0)
+        with col3: opening = num("رصيد مرحل من الشهر السابق", value=s["opening"] or None, step=500.0)
         note = col4.text_input("ملاحظة الترحيل", value=s["carry_note"])
         if st.form_submit_button("💾 حفظ البيانات الشهرية", type="primary"):
-            run("INSERT INTO monthly_data (year, month, basic_salary, cash_income, opening_balance, carry_note) "
-                "VALUES (?,?,?,?,?,?) ON CONFLICT(year, month) DO UPDATE SET "
-                "basic_salary=excluded.basic_salary, cash_income=excluded.cash_income, "
-                "opening_balance=excluded.opening_balance, carry_note=excluded.carry_note",
-                (y, m, sal, cash, opening, note))
+            run("INSERT INTO monthly_data (username, year, month, basic_salary, cash_income, opening_balance, carry_note) "
+                "VALUES (?,?,?,?,?,?,?) ON CONFLICT(username, year, month) DO UPDATE SET "
+                "basic_salary=excluded.basic_salary, cash_income=excluded.cash_income, opening_balance=excluded.opening_balance, carry_note=excluded.carry_note",
+                (username, y, m, sal, cash, opening, note))
             flash("✅ تم حفظ البيانات الشهرية.")
             st.rerun()
 
     section("💵 مبالغ مستلمة أخرى (مكافآت، حوالات...)")
     with st.form(f"income_form_{y}_{m}", clear_on_submit=True):
         a, b, c = st.columns(3)
-        with a:
-            amt = num("المبلغ")
+        with a: amt = num("المبلغ")
         src = b.selectbox("المصدر", INCOME_SOURCES)
         rd = c.date_input("تاريخ الاستلام", value="today")
         inote = st.text_input("ملاحظة")
         if st.form_submit_button("➕ إضافة المبلغ"):
             if amt > 0:
-                run("INSERT INTO incomes(amount, for_year, for_month, received_date, source, note, created_at) "
-                    "VALUES(?,?,?,?,?,?,?)", (amt, y, m, rd.isoformat(), src, inote.strip(),
-                                              datetime.now().isoformat(timespec="seconds")))
+                run("INSERT INTO incomes(username, amount, for_year, for_month, received_date, source, note, created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)", (username, amt, y, m, rd.isoformat(), src, inote.strip(), datetime.now().isoformat(timespec="seconds")))
                 flash(f"✅ تمت إضافة {fmt(amt)}.")
                 st.rerun()
-            else:
-                st.error("أدخل مبلغًا أكبر من صفر.")
-    inc = query_df("SELECT id, received_date, amount, source, note FROM incomes WHERE for_year=? AND for_month=? "
-                   "ORDER BY received_date DESC", (y, m))
+            else: st.error("أدخل مبلغًا أكبر من صفر.")
+    
+    inc = query_df("SELECT id, received_date, amount, source, note FROM incomes WHERE username=? AND for_year=? AND for_month=? ORDER BY received_date DESC", (username, y, m))
     for _, r in inc.iterrows():
         a, b = st.columns([6, 1])
         a.write(f"**{fmt(r.amount)}** — {r.source} — {r.received_date} {('· ' + r.note) if r.note else ''}")
         if b.button("🗑️", key=f"delinc_{r.id}"):
-            run("DELETE FROM incomes WHERE id=?", (int(r.id),))
+            run("DELETE FROM incomes WHERE username=? AND id=?", (username, int(r.id)))
             st.rerun()
 
 def page_budgets() -> None:
+    username = st.session_state.get("current_user", "admin")
     page_header("🎯 الميزانيات والأهداف", "حدود الإنفاق وأهداف الادخار")
     tab1, tab2 = st.tabs(["📉 الميزانيات الشهرية", "🚀 الأهداف المالية"])
     with tab1:
@@ -853,27 +808,24 @@ def page_budgets() -> None:
                 with cols[i % 2]:
                     new_b[c] = num(cat_label(c), value=float(budgets.get(c, 0.0)) or None, key=f"bud_{c}")
             if st.form_submit_button("💾 حفظ الميزانيات", type="primary"):
-                run_many([("INSERT INTO budgets (category, monthly_limit) VALUES (?,?) "
-                           "ON CONFLICT(category) DO UPDATE SET monthly_limit=excluded.monthly_limit", (c, v))
+                run_many([("INSERT INTO budgets (username, category, monthly_limit) VALUES (?,?,?) "
+                           "ON CONFLICT(username, category) DO UPDATE SET monthly_limit=excluded.monthly_limit", (username, c, v))
                           for c, v in new_b.items()])
                 flash("✅ تم حفظ الميزانيات. ستظهر حالتها في لوحة التحكم.")
                 st.rerun()
     with tab2:
-        goals = query_df("SELECT * FROM goals ORDER BY id DESC")
-        if goals.empty:
-            st.info("لا أهداف بعد. أضف هدفًا مثل «سفر» أو «صندوق طوارئ».")
+        goals = query_df("SELECT * FROM goals WHERE username=? ORDER BY id DESC", (username,))
+        if goals.empty: st.info("لا أهداف بعد. أضف هدفًا مثل «سفر» أو «صندوق طوارئ».")
         for _, g in goals.iterrows():
-            progress_bar(f"{g['name']}", g.saved, g.target,
-                         f"{fmt(g.saved)} / {fmt(g.target)} — باقي {fmt(max(g.target - g.saved, 0))}")
+            progress_bar(f"{g['name']}", g.saved, g.target, f"{fmt(g.saved)} / {fmt(g.target)} — باقي {fmt(max(g.target - g.saved, 0))}")
             a, b, c = st.columns([2, 1, 1])
-            with a:
-                add = num("إضافة مبلغ", key=f"gadd_{g.id}", label_visibility="collapsed")
+            with a: add = num("إضافة مبلغ", key=f"gadd_{g.id}", label_visibility="collapsed")
             if b.button("➕ ادّخر", key=f"gsave_{g.id}") and add > 0:
-                run("UPDATE goals SET saved=saved+? WHERE id=?", (add, int(g.id)))
+                run("UPDATE goals SET saved=saved+? WHERE username=? AND id=?", (add, username, int(g.id)))
                 flash(f"✅ أُضيف {fmt(add)} إلى «{g['name']}».")
                 st.rerun()
             if c.button("🗑️ حذف", key=f"gdel_{g.id}"):
-                run("DELETE FROM goals WHERE id=?", (int(g.id),))
+                run("DELETE FROM goals WHERE username=? AND id=?", (username, int(g.id)))
                 st.rerun()
         with st.expander("➕ إضافة هدف جديد"):
             with st.form("new_goal", clear_on_submit=True):
@@ -882,37 +834,33 @@ def page_budgets() -> None:
                 saved = num("المدخر حاليًا", step=500.0)
                 if st.form_submit_button("إضافة الهدف", type="primary"):
                     if name.strip() and target > 0:
-                        run("INSERT INTO goals (name, target, saved, created_at) VALUES (?,?,?,?)",
-                            (name.strip(), target, saved, datetime.now().isoformat()))
+                        run("INSERT INTO goals (username, name, target, saved, created_at) VALUES (?,?,?,?,?)",
+                            (username, name.strip(), target, saved, datetime.now().isoformat()))
                         flash("✅ تمت إضافة الهدف.")
                         st.rerun()
-                    else:
-                        st.error("اكتب اسم الهدف ومبلغًا مستهدفًا أكبر من صفر.")
+                    else: st.error("اكتب اسم الهدف ومبلغًا مستهدفًا أكبر من صفر.")
 
 def page_wishes() -> None:
+    username = st.session_state.get("current_user", "admin")
     page_header("✨ قائمة الأمنيات", "خطّط لمشترياتك قبل ما تصرف")
-    wishes = query_df("SELECT * FROM wishes WHERE status='active' ORDER BY id DESC")
-    if wishes.empty:
-        st.info("القائمة فاضية. أضف أول أمنية من النموذج بالأسفل.")
+    wishes = query_df("SELECT * FROM wishes WHERE username=? AND status='active' ORDER BY id DESC", (username,))
+    if wishes.empty: st.info("القائمة فاضية. أضف أول أمنية من النموذج بالأسفل.")
     for _, w in wishes.iterrows():
         with st.container(border=True):
             st.markdown(f"### {esc(w['name'])}")
             st.caption(f"{w.kind or 'غير محدد'}" + (f" — {w.note}" if w.note else ""))
-            progress_bar("التقدم", w.saved, w.price,
-                         f"{fmt(w.saved)} / {fmt(w.price)} — باقي {fmt(max(w.price - w.saved, 0))}")
+            progress_bar("التقدم", w.saved, w.price, f"{fmt(w.saved)} / {fmt(w.price)} — باقي {fmt(max(w.price - w.saved, 0))}")
             a, b, c, d = st.columns([2, 1, 1, 1])
-            with a:
-                add = num("مبلغ", key=f"wadd_{w.id}", label_visibility="collapsed")
+            with a: add = num("مبلغ", key=f"wadd_{w.id}", label_visibility="collapsed")
             if b.button("➕ خصّص", key=f"wsave_{w.id}") and add > 0:
-                run("UPDATE wishes SET saved=saved+? WHERE id=?", (add, int(w.id)))
+                run("UPDATE wishes SET saved=saved+? WHERE username=? AND id=?", (add, username, int(w.id)))
                 st.rerun()
             if c.button("✅ تم الشراء", key=f"buy_{w.id}"):
-                run("UPDATE wishes SET status='bought', bought_at=? WHERE id=?",
-                    (datetime.now().isoformat(), int(w.id)))
+                run("UPDATE wishes SET status='bought', bought_at=? WHERE username=? AND id=?", (datetime.now().isoformat(), username, int(w.id)))
                 flash("🎉 مبروك! نُقلت إلى المشتريات.")
                 st.rerun()
             if d.button("🗑️ حذف", key=f"wdel_{w.id}"):
-                run("DELETE FROM wishes WHERE id=?", (int(w.id),))
+                run("DELETE FROM wishes WHERE username=? AND id=?", (username, int(w.id)))
                 st.rerun()
 
     with st.expander("➕ إضافة أمنية جديدة", expanded=wishes.empty):
@@ -920,21 +868,18 @@ def page_wishes() -> None:
             w1, w2 = st.columns(2)
             name, kind = w1.text_input("اسم السلعة / الخدمة"), w2.selectbox("النوع", WISH_KINDS)
             w3, w4 = st.columns(2)
-            with w3:
-                price = num("السعر المتوقع", step=500.0)
-            with w4:
-                saved = num("المخصص لها حاليًا")
+            with w3: price = num("السعر المتوقع", step=500.0)
+            with w4: saved = num("المخصص لها حاليًا")
             note = st.text_input("رابط المنتج أو ملاحظات")
             if st.form_submit_button("إضافة للقائمة", type="primary"):
                 if name.strip() and price > 0:
-                    run("INSERT INTO wishes (name, kind, price, saved, note, created_at) VALUES (?,?,?,?,?,?)",
-                        (name.strip(), kind, price, saved, note.strip(), datetime.now().isoformat()))
+                    run("INSERT INTO wishes (username, name, kind, price, saved, note, created_at) VALUES (?,?,?,?,?,?,?)",
+                        (username, name.strip(), kind, price, saved, note.strip(), datetime.now().isoformat()))
                     flash("✅ تمت الإضافة.")
                     st.rerun()
-                else:
-                    st.error("اكتب الاسم وسعرًا أكبر من صفر.")
+                else: st.error("اكتب الاسم وسعرًا أكبر من صفر.")
 
-    bought = query_df("SELECT name, price, bought_at FROM wishes WHERE status='bought' ORDER BY bought_at DESC")
+    bought = query_df("SELECT name, price, bought_at FROM wishes WHERE username=? AND status='bought' ORDER BY bought_at DESC", (username,))
     if not bought.empty:
         with st.expander(f"🛍️ تم شراؤها ({len(bought)})"):
             bought["bought_at"] = bought["bought_at"].str[:10]
@@ -943,48 +888,40 @@ def page_wishes() -> None:
             html_table(bought)
 
 def page_settings() -> None:
+    username = st.session_state.get("current_user", "admin")
     page_header("⚙️ الإعدادات", "الاسم، النسخ الاحتياطي، وإدارة البيانات")
     section("بيانات المستخدم")
-    new_name = st.text_input("اسم المستخدم", value=get_setting("user_name"))
+    new_name = st.text_input("اسم العرض", value=get_setting("user_name"))
     if st.button("حفظ الاسم") and new_name.strip():
         set_setting("user_name", new_name.strip())
         flash("✅ تم تحديث الاسم.")
         st.rerun()
 
-    section("💾 النسخ الاحتياطي")
-    st.caption("نزّل نسخة من بياناتك بانتظام، خصوصًا قبل أي تحديث للبرنامج.")
-    a, b = st.columns(2)
-    try:
-        with _lock:
-            get_conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        with open(DB_PATH, "rb") as f:
-            a.download_button("⬇️ نسخة كاملة (قاعدة البيانات)", f.read(),
-                              f"finance_backup_{date.today().isoformat()}.db", "application/octet-stream")
-    except OSError:
-        a.warning("تعذر قراءة ملف قاعدة البيانات.")
-    alle = query_df("SELECT expense_date, amount, details, category FROM daily_expenses ORDER BY expense_date")
-    b.download_button("⬇️ كل المصاريف (CSV)", alle.to_csv(index=False).encode("utf-8-sig"),
-                      "all_expenses.csv", "text/csv")
-
+    st.markdown("<hr style='border-color: #e0cfa3; margin: 30px 0;'>", unsafe_allow_html=True)
+    
     section("منطقة الخطر")
-    st.warning("⚠️ إعادة الضبط تحذف كل البيانات ولا يمكن التراجع عنها.")
+    st.warning(f"⚠️ إعادة الضبط تحذف كل البيانات الخاصة بحسابك (**{username}**) ولا يمكن التراجع عنها.")
     if not st.session_state.get("confirm_reset"):
-        if st.button("🔴 بدء إعادة ضبط المصنع"):
+        if st.button("🔴 بدء إعادة ضبط المصنع لحسابي"):
             st.session_state["confirm_reset"] = True
             st.rerun()
     else:
-        st.error("تأكيد نهائي: هل أنت متأكد من مسح كل شيء؟")
+        st.error("تأكيد نهائي: هل أنت متأكد من مسح كل بياناتك؟")
         c1, c2 = st.columns(2)
-        if c1.button("نعم، امسح كل البيانات", type="primary"):
-            run_many([(f"DELETE FROM {t}", ()) for t in
-                      ("attachments", "daily_expenses", "monthly_data", "budgets", "goals",
-                       "incomes", "fin_details", "wishes", "settings")])
+        if c1.button("نعم، امسح كل بياناتي", type="primary"):
+            run_many([(f"DELETE FROM {t} WHERE username=?", (username,)) for t in
+                      ("attachments", "daily_expenses", "monthly_data", "budgets", "goals", "incomes", "fin_details", "wishes", "settings")])
             st.session_state.clear()
             flash("تم مسح جميع البيانات.")
             st.rerun()
         if c2.button("إلغاء"):
             st.session_state["confirm_reset"] = False
             st.rerun()
+            
+    st.markdown("<hr style='border-color: #d1495b; margin: 30px 0;'>", unsafe_allow_html=True)
+    if st.button("🚪 تسجيل الخروج", type="secondary", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
 
 # ==========================================================
 # 7. التوجيه الرئيسي
@@ -995,11 +932,17 @@ ROUTES = {"dashboard": page_dashboard, "expenses": page_expenses, "monthly": pag
 def main() -> None:
     inject_css()
     get_conn()
-    ensure_profile()
+    
+    # التحقق من حالة تسجيل الدخول
+    if not st.session_state.get("logged_in"):
+        render_auth_page()
+        return
+        
     if st.session_state.get("flash"):
         st.toast(st.session_state.pop("flash"))
+        
     render_top_nav()
-    ROUTES.get(st.session_state["current_page"], page_dashboard)()
+    ROUTES.get(st.session_state.get("current_page", "dashboard"), page_dashboard)()
 
 if __name__ == "__main__":
     main()
