@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 3.0
+نظامي المالي الشخصي - الإصدار 3.1
 تشغيل: py -m streamlit run app.py
 """
 import calendar
@@ -36,15 +36,17 @@ FIN_KINDS = ["مدخرات", "حساب بنكي", "كاش", "ذهب", "استث�
 LIABILITY = "دين عليّ"
 INCOME_SOURCES = ["راتب", "دخل إضافي", "مكافأة", "حوالة", "أخرى"]
 WISH_KINDS = ["احتياج ضروري", "رغبة ترفيهية", "استثمار/تطوير"]
+NUM = "%g"  # عرض الأرقام بدون أصفار زائدة
 
 PAGES = {
     "dashboard": "📊 لوحة التحكم", "expenses": "💸 المصاريف", "monthly": "📅 الدخل الشهري",
     "budgets": "🎯 الميزانيات والأهداف", "wishes": "✨ الأمنيات", "settings": "⚙️ الإعدادات",
 }
 
-# هوية الألوان: أخضر عميق للثقة، ذهبي للتنبيه، مرجاني للمصروف
-C_PRIMARY, C_DEEP, C_INCOME = "#0b5d4b", "#073b30", "#0b5d4b"
-C_EXPENSE, C_ACCENT, C_INK, C_MUTED, C_SURFACE = "#d1495b", "#c8861a", "#16262b", "#5b6b72", "#f3f7f6"
+# هوية الألوان: خلفية بيج، نص بني غامق، أخضر للدخل، مرجاني للمصروف
+C_PRIMARY, C_DEEP, C_INCOME = "#5a3e2b", "#3b2a1f", "#2f7d5b"
+C_EXPENSE, C_ACCENT, C_INK, C_MUTED = "#c8465a", "#b9791f", "#3b2a1f", "#7a6552"
+C_BG, C_CARD, C_LINE = "#f5ede0", "#fffaf2", "#e3d6c1"
 
 # ==========================================================
 # 1. قاعدة البيانات
@@ -262,41 +264,57 @@ def fmt(x: float) -> str:
 def esc(x) -> str:
     return html.escape(str(x))
 
+def num(label: str, value=None, step: float = 100.0, **kw):
+    """حقل رقم فارغ افتراضيًا (بدون 0.00). يرجع 0.0 لو ترك فارغًا."""
+    v = st.number_input(label, min_value=0.0, value=value, step=step, format=NUM, **kw)
+    return float(v or 0.0)
+
 def inject_css() -> None:
     st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-:root {{ --primary:{C_PRIMARY}; --deep:{C_DEEP}; --ink:{C_INK}; --muted:{C_MUTED};
-        --surface:{C_SURFACE}; --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:#16a34a; }}
+:root {{ --primary:{C_PRIMARY}; --deep:{C_DEEP}; --ink:{C_INK}; --muted:{C_MUTED}; --bg:{C_BG};
+        --card:{C_CARD}; --line:{C_LINE}; --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:{C_INCOME}; }}
 .stApp, .stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
 .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp [data-baseweb] {{ font-family:'Cairo',sans-serif !important; }}
-.stApp {{ direction:rtl; background:var(--surface); color:var(--ink); font-size:17px; }}
+.stApp {{ direction:rtl; background:var(--bg); color:var(--ink); font-size:17px; color-scheme:light; }}
+.stApp p, .stApp label, .stApp span, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+.stApp li, .stApp [data-testid="stCaptionContainer"] {{ color:var(--ink); }}
 .block-container {{ max-width:1320px; padding-top:1.2rem; padding-bottom:4rem; }}
 header[data-testid="stHeader"], section[data-testid="stSidebar"], footer {{ display:none !important; }}
 h1,h2,h3,h4,p,label,.stMarkdown {{ text-align:right; }}
-input, textarea {{ font-size:17px !important; }}
 
-/* شريط التنقل: أزرار راديو أفقية بشكل أقراص */
+/* الحقول: خلفية فاتحة ونص بني، وبدون أزرار +/- */
+div[data-baseweb="input"], div[data-baseweb="base-input"], div[data-baseweb="select"] > div,
+div[data-baseweb="textarea"], div[data-testid="stDateInput"] div[data-baseweb="input"] {{
+    background:var(--card) !important; border-color:var(--line) !important; border-radius:12px !important; }}
+.stApp input, .stApp textarea {{ background:var(--card) !important; color:var(--ink) !important;
+    -webkit-text-fill-color:var(--ink) !important; font-size:17px !important; }}
+button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStepDown"] {{ display:none !important; }}
+div[data-testid="stNumberInput"] > div {{ background:var(--card) !important; border-radius:12px; }}
+
+/* شريط التنقل: أقراص أفقية */
 div[data-testid="stRadio"] > div[role="radiogroup"] {{
     display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
-    background:#fff; padding:8px; border-radius:16px; border:1px solid #dfe7e5;
-    box-shadow:0 2px 10px rgba(7,59,48,.06); }}
+    background:var(--card); padding:8px; border-radius:16px; border:1px solid var(--line);
+    box-shadow:0 2px 10px rgba(59,42,31,.07); }}
 div[data-testid="stRadio"] label[data-baseweb="radio"] {{
     padding:9px 18px; border-radius:12px; cursor:pointer; margin:0; transition:background .15s; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display:none; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:hover {{ background:#e6efec; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{ background:var(--primary); }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {{ color:#fff; }}
-div[data-testid="stRadio"] label p {{ font-weight:700; font-size:16px; margin:0; }}
+div[data-testid="stRadio"] label[data-baseweb="radio"] > div:first-of-type {{ display:none !important; }}
+div[data-testid="stRadio"] label[data-baseweb="radio"] p {{ color:var(--ink) !important; opacity:1 !important;
+    font-weight:700; font-size:16px; margin:0; }}
+div[data-testid="stRadio"] label[data-baseweb="radio"]:hover {{ background:#efe3cf; }}
+div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{ background:var(--deep); }}
+div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {{ color:#fff !important; }}
 
 /* ترويسة الصفحة */
-.app-header {{ background:linear-gradient(120deg,var(--deep),var(--primary)); color:#fff;
+.app-header {{ background:linear-gradient(120deg,var(--deep),#6b4a33); color:#fff;
     padding:26px 32px; border-radius:20px; margin:18px 0 22px; }}
 .app-header h1 {{ margin:0; font-size:2rem; font-weight:800; color:#fff; }}
-.app-header p {{ margin:6px 0 0; opacity:.85; font-size:1.05rem; color:#fff; }}
+.app-header p {{ margin:6px 0 0; opacity:.88; font-size:1.05rem; color:#fff; }}
 
 /* بطاقات المؤشرات */
-.kpi {{ background:#fff; border:1px solid #dfe7e5; border-radius:16px; padding:16px 20px;
+.kpi {{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 20px;
     margin-bottom:12px; height:calc(100% - 12px); position:relative; overflow:hidden; }}
 .kpi::before {{ content:""; position:absolute; top:0; right:0; width:5px; height:100%; background:var(--primary); }}
 .kpi.good::before {{ background:var(--good); }} .kpi.bad::before {{ background:var(--bad); }}
@@ -304,27 +322,27 @@ div[data-testid="stRadio"] label p {{ font-weight:700; font-size:16px; margin:0;
 .kpi-label {{ font-size:.95rem; color:var(--muted); font-weight:600; }}
 .kpi-value {{ font-size:1.7rem; font-weight:800; line-height:1.5; color:var(--ink); }}
 .kpi-sub {{ font-size:.88rem; color:var(--muted); min-height:1.2em; }}
-.kpi.main {{ background:linear-gradient(135deg,var(--primary),var(--deep)); border:none; }}
+.kpi.main {{ background:linear-gradient(135deg,var(--deep),#6b4a33); border:none; }}
 .kpi.main::before {{ display:none; }}
 .kpi.main .kpi-label, .kpi.main .kpi-value, .kpi.main .kpi-sub {{ color:#fff; }}
 .kpi.main .kpi-value {{ font-size:2.1rem; }}
 
 .section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px;
-    border-right:4px solid var(--accent); }}
+    border-right:4px solid var(--accent); color:var(--ink); }}
 
-/* شريط الميزانية */
-.bar-row {{ background:#fff; border:1px solid #dfe7e5; border-radius:14px; padding:12px 16px; margin-bottom:10px; }}
-.bar-head {{ display:flex; justify-content:space-between; font-weight:700; margin-bottom:8px; }}
+/* شريط التقدم */
+.bar-row {{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 16px; margin-bottom:10px; }}
+.bar-head {{ display:flex; justify-content:space-between; font-weight:700; margin-bottom:8px; color:var(--ink); }}
 .bar-head span:last-child {{ color:var(--muted); font-weight:600; font-size:.92rem; }}
-.bar-track {{ background:#e8eeec; border-radius:99px; height:10px; overflow:hidden; }}
+.bar-track {{ background:#eadfcb; border-radius:99px; height:10px; overflow:hidden; }}
 .bar-fill {{ height:100%; border-radius:99px; }}
 
-/* نصيحة ذكية */
-.tip {{ background:#fff8e8; border:1px solid #f1dcae; border-right:5px solid var(--accent);
-    border-radius:14px; padding:12px 16px; margin:8px 0; }}
+.tip {{ background:#fbf0d9; border:1px solid #ecd49b; border-right:5px solid var(--accent);
+    border-radius:14px; padding:12px 16px; margin:8px 0; color:var(--ink); }}
 
 .stButton > button, .stDownloadButton > button {{ border-radius:12px; font-weight:700; padding:8px 22px; }}
-div[data-testid="stForm"], div[data-testid="stExpander"] {{ background:#fff; border-radius:16px; border-color:#dfe7e5; }}
+div[data-testid="stForm"], div[data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"] {{
+    background:var(--card); border-radius:16px; border-color:var(--line); }}
 @media (max-width:760px) {{ .kpi-value {{ font-size:1.35rem; }} .app-header {{ padding:18px; }} }}
 </style>""", unsafe_allow_html=True)
 
@@ -348,7 +366,7 @@ def section(title: str) -> None:
 
 def progress_bar(title: str, used: float, limit: float, right_note: str = "") -> None:
     pct = used / limit * 100 if limit > 0 else 0
-    color = C_PRIMARY if pct < 80 else C_ACCENT if pct < 100 else C_EXPENSE
+    color = C_INCOME if pct < 80 else C_ACCENT if pct < 100 else C_EXPENSE
     note = right_note or f"{fmt(used)} من {fmt(limit)} ({pct:.0f}%)"
     st.markdown(f'<div class="bar-row"><div class="bar-head"><span>{esc(title)}</span><span>{esc(note)}</span></div>'
                 f'<div class="bar-track"><div class="bar-fill" style="width:{min(pct, 100):.1f}%;background:{color}"></div>'
@@ -410,7 +428,7 @@ def ensure_profile() -> None:
     page_header("👋 أهلاً بك في نظامك المالي", "اكتب اسمك وابدأ تسجيل أول مصروف في أقل من دقيقة")
     with st.form("welcome"):
         name = st.text_input("اسم المستخدم")
-        saved0 = st.number_input("المبلغ المدخر بالفعل (اختياري)", min_value=0.0, step=1000.0, format="%.2f")
+        saved0 = num("المبلغ المدخر بالفعل (اختياري)", step=1000.0)
         ok = st.form_submit_button("ابدأ الاستخدام", type="primary")
     if ok:
         if name.strip():
@@ -440,7 +458,8 @@ def render_expense_form(scope: str) -> None:
     with b:
         cat = category_input("التصنيف", k("cat"))
     c, e = st.columns(2)
-    amount = c.number_input("المبلغ (ج.م)", min_value=0.0, step=10.0, format="%.2f", key=k("amount"))
+    with c:
+        amount = num("المبلغ (ج.م)", step=10.0, key=k("amount"))
     details = e.text_input("التفاصيل", key=k("details"))
 
     if st.button("➕ إضافة المصروف", type="primary", key=k("save")):
@@ -468,8 +487,8 @@ def render_edit_panel(eid: int) -> None:
         with b:
             cat = category_input("التصنيف", f"{k}_cat", current=r.category or "")
         c, e = st.columns(2)
-        amount = c.number_input("المبلغ (ج.م)", min_value=0.0, step=10.0, format="%.2f",
-                                value=float(r.amount), key=f"{k}_amount")
+        with c:
+            amount = num("المبلغ (ج.م)", value=float(r.amount), step=10.0, key=f"{k}_amount")
         details = e.text_input("التفاصيل", value=r.details or "", key=f"{k}_details")
 
         atts = query_df("SELECT id, kind, name FROM attachments WHERE expense_id=?", (eid,))
@@ -519,17 +538,17 @@ def carry_forward(year: int, month: int, amount: float, note: str) -> None:
     flash(f"✅ تم ترحيل {fmt(amount)} إلى هذا الشهر.")
 
 def render_insights(year: int, month: int, s: dict, prev: dict) -> None:
-    ins = month_insights(year, month, s, prev)
     if s["expenses"] <= 0:
         return
+    ins = month_insights(year, month, s, prev)
     section("🧠 قراءة ذكية لشهرك")
     c = st.columns(4)
     with c[0]: kpi("متوسط الصرف اليومي", fmt(ins["avg"]), "منذ بداية الشهر")
     with c[1]:
         if ins["is_current"]:
+            over = ins["projected"] > s["income"] > 0
             kpi("توقع إجمالي الشهر", fmt(ins["projected"]),
-                "فوق دخلك!" if ins["projected"] > s["income"] > 0 else "بنفس الوتيرة الحالية",
-                "bad" if ins["projected"] > s["income"] > 0 else "")
+                "فوق دخلك!" if over else "بنفس الوتيرة الحالية", "bad" if over else "")
         else:
             kpi("إجمالي الشهر", fmt(s["expenses"]), "شهر مكتمل")
     with c[2]:
@@ -539,7 +558,8 @@ def render_insights(year: int, month: int, s: dict, prev: dict) -> None:
         if ins["change"] is None:
             kpi("مقارنة بالشهر السابق", "—", "لا توجد بيانات سابقة")
         else:
-            kpi("مقارنة بالشهر السابق", f"{ins['change']:+.0f}%", "المصروف ارتفع" if ins["change"] > 0 else "المصروف انخفض",
+            kpi("مقارنة بالشهر السابق", f"{ins['change']:+.0f}%",
+                "المصروف ارتفع" if ins["change"] > 0 else "المصروف انخفض",
                 "bad" if ins["change"] > 0 else "good")
     if s["income"] > 0 and s["rate"] < 10:
         tip(f"نسبة ادخارك {s['rate']:.1f}% فقط. جرّب هدف 20% ببدء الشهر بتحويل مبلغ ثابت للمدخرات.")
@@ -551,7 +571,8 @@ def render_budget_status(year: int, month: int) -> None:
     if not budgets:
         return
     section("🎯 الميزانيات هذا الشهر")
-    spent = dict(zip(*category_totals(year, month).values.T)) if not category_totals(year, month).empty else {}
+    cats = category_totals(year, month)
+    spent = dict(zip(cats.category, cats.amount))
     over = [c for c, lim in budgets.items() if float(spent.get(c, 0)) > lim]
     if over:
         st.error("تجاوزت الميزانية في: " + "، ".join(over))
@@ -629,14 +650,13 @@ def page_dashboard() -> None:
     if not daily.empty:
         section("📈 تراكم المصروف خلال الشهر")
         daily["cum"] = daily["amount"].cumsum()
-        base = alt.Chart(daily).encode(x=alt.X("day:Q", title="اليوم"),
-                                       y=alt.Y("cum:Q", title=None),
+        base = alt.Chart(daily).encode(x=alt.X("day:Q", title="اليوم"), y=alt.Y("cum:Q", title=None),
                                        tooltip=[alt.Tooltip("day:Q", title="اليوم"),
                                                 alt.Tooltip("cum:Q", title="التراكم", format=",.0f")])
         layers = base.mark_area(opacity=.18, color=C_EXPENSE) + base.mark_line(color=C_EXPENSE, point=True)
         if s["income"] > 0:
             layers += alt.Chart(pd.DataFrame({"y": [s["income"]]})).mark_rule(
-                color=C_PRIMARY, strokeDash=[6, 4]).encode(y="y:Q")
+                color=C_INCOME, strokeDash=[6, 4]).encode(y="y:Q")
         show_chart(layers.properties(height=280))
         if s["income"] > 0:
             st.caption("الخط المتقطع الأخضر = دخلك هذا الشهر. عندما يلمسه الخط الأحمر فقد صرفت كل دخلك.")
@@ -686,10 +706,13 @@ def page_monthly_details() -> None:
     section(f"بيانات شهر {MONTHS_AR[m - 1]} {y}")
     with st.form(f"monthly_form_{y}_{m}"):
         col1, col2 = st.columns(2)
-        sal = col1.number_input("الراتب الأساسي", min_value=0.0, value=s["salary"], step=500.0)
-        cash = col2.number_input("دخل كاش / إضافي", min_value=0.0, value=s["cash"], step=500.0)
+        with col1:
+            sal = num("الراتب الأساسي", value=s["salary"] or None, step=500.0)
+        with col2:
+            cash = num("دخل كاش / إضافي", value=s["cash"] or None, step=500.0)
         col3, col4 = st.columns(2)
-        opening = col3.number_input("رصيد مرحل من الشهر السابق", min_value=0.0, value=s["opening"], step=500.0)
+        with col3:
+            opening = num("رصيد مرحل من الشهر السابق", value=s["opening"] or None, step=500.0)
         note = col4.text_input("ملاحظة الترحيل", value=s["carry_note"])
         if st.form_submit_button("💾 حفظ البيانات الشهرية", type="primary"):
             run("INSERT INTO monthly_data (year, month, basic_salary, cash_income, opening_balance, carry_note) "
@@ -703,7 +726,8 @@ def page_monthly_details() -> None:
     section("💵 مبالغ مستلمة أخرى (مكافآت، حوالات...)")
     with st.form(f"income_form_{y}_{m}", clear_on_submit=True):
         a, b, c = st.columns(3)
-        amt = a.number_input("المبلغ", min_value=0.0, step=100.0)
+        with a:
+            amt = num("المبلغ")
         src = b.selectbox("المصدر", INCOME_SOURCES)
         rd = c.date_input("تاريخ الاستلام", value="today")
         inote = st.text_input("ملاحظة")
@@ -729,13 +753,13 @@ def page_budgets() -> None:
     page_header("🎯 الميزانيات والأهداف", "حدود الإنفاق وأهداف الادخار")
     tab1, tab2 = st.tabs(["📉 الميزانيات الشهرية", "🚀 الأهداف المالية"])
     with tab1:
-        section("حد أقصى شهري لكل تصنيف (اتركه 0 لعدم التحديد)")
+        section("حد أقصى شهري لكل تصنيف (اتركه فارغًا لعدم التحديد)")
         budgets = get_budgets()
         with st.form("budget_form"):
             new_b, cols = {}, st.columns(2)
             for i, c in enumerate(all_categories()):
-                new_b[c] = cols[i % 2].number_input(cat_label(c), min_value=0.0,
-                                                    value=float(budgets.get(c, 0.0)), step=100.0)
+                with cols[i % 2]:
+                    new_b[c] = num(cat_label(c), value=float(budgets.get(c, 0.0)) or None, key=f"bud_{c}")
             if st.form_submit_button("💾 حفظ الميزانيات", type="primary"):
                 run_many([("INSERT INTO budgets (category, monthly_limit) VALUES (?,?) "
                            "ON CONFLICT(category) DO UPDATE SET monthly_limit=excluded.monthly_limit", (c, v))
@@ -750,8 +774,8 @@ def page_budgets() -> None:
             progress_bar(f"{g['name']}", g.saved, g.target,
                          f"{fmt(g.saved)} / {fmt(g.target)} — باقي {fmt(max(g.target - g.saved, 0))}")
             a, b, c = st.columns([2, 1, 1])
-            add = a.number_input("إضافة مبلغ", min_value=0.0, step=100.0, key=f"gadd_{g.id}",
-                                 label_visibility="collapsed")
+            with a:
+                add = num("إضافة مبلغ", key=f"gadd_{g.id}", label_visibility="collapsed")
             if b.button("➕ ادّخر", key=f"gsave_{g.id}") and add > 0:
                 run("UPDATE goals SET saved=saved+? WHERE id=?", (add, int(g.id)))
                 flash(f"✅ أُضيف {fmt(add)} إلى «{g['name']}».")
@@ -762,13 +786,16 @@ def page_budgets() -> None:
         with st.expander("➕ إضافة هدف جديد"):
             with st.form("new_goal", clear_on_submit=True):
                 name = st.text_input("اسم الهدف")
-                target = st.number_input("المبلغ المستهدف", min_value=100.0, step=1000.0)
-                saved = st.number_input("المدخر حاليًا", min_value=0.0, step=500.0)
-                if st.form_submit_button("إضافة الهدف", type="primary") and name.strip():
-                    run("INSERT INTO goals (name, target, saved, created_at) VALUES (?,?,?,?)",
-                        (name.strip(), target, saved, datetime.now().isoformat()))
-                    flash("✅ تمت إضافة الهدف.")
-                    st.rerun()
+                target = num("المبلغ المستهدف", step=1000.0)
+                saved = num("المدخر حاليًا", step=500.0)
+                if st.form_submit_button("إضافة الهدف", type="primary"):
+                    if name.strip() and target > 0:
+                        run("INSERT INTO goals (name, target, saved, created_at) VALUES (?,?,?,?)",
+                            (name.strip(), target, saved, datetime.now().isoformat()))
+                        flash("✅ تمت إضافة الهدف.")
+                        st.rerun()
+                    else:
+                        st.error("اكتب اسم الهدف ومبلغًا مستهدفًا أكبر من صفر.")
 
 def page_wishes() -> None:
     page_header("✨ قائمة الأمنيات", "خطّط لمشترياتك قبل ما تصرف")
@@ -782,7 +809,8 @@ def page_wishes() -> None:
             progress_bar("التقدم", w.saved, w.price,
                          f"{fmt(w.saved)} / {fmt(w.price)} — باقي {fmt(max(w.price - w.saved, 0))}")
             a, b, c, d = st.columns([2, 1, 1, 1])
-            add = a.number_input("مبلغ", min_value=0.0, step=100.0, key=f"wadd_{w.id}", label_visibility="collapsed")
+            with a:
+                add = num("مبلغ", key=f"wadd_{w.id}", label_visibility="collapsed")
             if b.button("➕ خصّص", key=f"wsave_{w.id}") and add > 0:
                 run("UPDATE wishes SET saved=saved+? WHERE id=?", (add, int(w.id)))
                 st.rerun()
@@ -800,8 +828,10 @@ def page_wishes() -> None:
             w1, w2 = st.columns(2)
             name, kind = w1.text_input("اسم السلعة / الخدمة"), w2.selectbox("النوع", WISH_KINDS)
             w3, w4 = st.columns(2)
-            price = w3.number_input("السعر المتوقع", min_value=0.0, step=500.0)
-            saved = w4.number_input("المخصص لها حاليًا", min_value=0.0, step=100.0)
+            with w3:
+                price = num("السعر المتوقع", step=500.0)
+            with w4:
+                saved = num("المخصص لها حاليًا")
             note = st.text_input("رابط المنتج أو ملاحظات")
             if st.form_submit_button("إضافة للقائمة", type="primary"):
                 if name.strip() and price > 0:
@@ -834,8 +864,7 @@ def page_settings() -> None:
     a, b = st.columns(2)
     try:
         with _lock:
-            conn = get_conn()
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            get_conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         with open(DB_PATH, "rb") as f:
             a.download_button("⬇️ نسخة كاملة (قاعدة البيانات)", f.read(),
                               f"finance_backup_{date.today().isoformat()}.db", "application/octet-stream")
