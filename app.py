@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 3.2
+نظامي المالي الشخصي - الإصدار 3.3
 تشغيل: py -m streamlit run app.py
 """
 import calendar
@@ -278,9 +278,9 @@ def inject_css() -> None:
         --bg:{C_BG}; --card:{C_CARD}; --line:{C_LINE}; --field:{C_FIELD};
         --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:{C_INCOME}; }}
 
-/* الخلفية السمني على كل الطبقات (بما فيها الحواف) */
+/* الخلفية السمني على كل الطبقات */
 html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-[data-testid="stHeader"], [data-testid="stBottom"], .main {{ background:var(--bg) !important; }}
+[data-testid="stHeader"], [data-testid="stBottom"] {{ background:var(--bg) !important; }}
 
 .stApp, .stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
 .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp [data-baseweb] {{ font-family:'Cairo',sans-serif !important; }}
@@ -297,29 +297,54 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
 header[data-testid="stHeader"], section[data-testid="stSidebar"], footer {{ display:none !important; }}
 h1,h2,h3,h4,p,label,.stMarkdown {{ text-align:right; }}
 
-/* الحقول والقوائم المنسدلة: سمني فاتح ونص أسود */
-.stApp div[data-baseweb="input"], .stApp div[data-baseweb="base-input"],
-.stApp div[data-baseweb="textarea"], .stApp [data-testid="stNumberInput"] > div,
-.stApp div[data-baseweb="select"] > div {{
-    background:var(--field) !important; border-color:var(--line) !important; border-radius:12px !important; }}
-.stApp input, .stApp textarea {{ background:var(--field) !important; color:var(--ink) !important;
-    -webkit-text-fill-color:var(--ink) !important; font-size:17px !important; }}
-.stApp div[data-baseweb="select"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
-.stApp div[data-baseweb="select"] svg {{ fill:var(--ink) !important; }}
-div[data-baseweb="popover"] *, ul[role="listbox"], ul[role="listbox"] * {{
-    background-color:var(--field) !important; color:var(--ink) !important; }}
-li[role="option"]:hover, li[role="option"][aria-selected="true"] {{ background-color:#efe0b3 !important; }}
-div[data-baseweb="calendar"], div[data-baseweb="calendar"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
+/* كل الحقول والقوائم: سمني فاتح ونص أسود، بدون أي جزء غامق */
+.stApp [data-baseweb="select"], .stApp [data-baseweb="select"] *,
+.stApp [data-baseweb="input"], .stApp [data-baseweb="input"] *,
+.stApp [data-baseweb="base-input"], .stApp [data-baseweb="base-input"] *,
+.stApp [data-baseweb="textarea"], .stApp [data-baseweb="textarea"] *,
+.stApp [data-testid="stDateInput"] *, .stApp [data-testid="stNumberInput"] *,
+.stApp [data-testid="stTextInput"] *, .stApp [data-testid="stSelectbox"] [data-baseweb] * {{
+    background-color:var(--field) !important; color:var(--ink) !important;
+    -webkit-text-fill-color:var(--ink) !important; }}
+.stApp [data-baseweb="select"] svg, .stApp [data-testid="stDateInput"] svg {{ fill:var(--ink) !important; color:var(--ink) !important; }}
+.stApp [data-baseweb="select"] > div, .stApp [data-baseweb="input"], .stApp [data-baseweb="textarea"] {{
+    border:1px solid var(--line) !important; border-radius:12px !important; }}
+.stApp input, .stApp textarea {{ font-size:17px !important; }}
+.stApp input::placeholder, .stApp textarea::placeholder {{
+    color:#8d7f55 !important; -webkit-text-fill-color:#8d7f55 !important; opacity:1; }}
 button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStepDown"] {{ display:none !important; }}
-[data-testid="stFileUploaderDropzone"] {{ background:var(--field) !important; border:1px dashed var(--line) !important;
-    border-radius:14px !important; }}
-[data-testid="stFileUploaderDropzone"] * {{ color:var(--ink) !important; }}
-[data-testid="stFileUploaderDropzone"] button {{ background:var(--card) !important; border:1px solid var(--line) !important; }}
+
+/* القوائم المنسدلة والتقويم */
+div[data-baseweb="popover"], div[data-baseweb="popover"] *, ul[role="listbox"], ul[role="listbox"] *,
+div[data-baseweb="calendar"], div[data-baseweb="calendar"] *, div[data-baseweb="menu"], div[data-baseweb="menu"] * {{
+    background-color:var(--field) !important; color:var(--ink) !important; }}
+li[role="option"]:hover, li[role="option"][aria-selected="true"],
+div[data-baseweb="calendar"] [aria-selected="true"] {{ background-color:#efe0b3 !important; }}
+
+/* مربعات الاختيار */
+.stApp label[data-baseweb="checkbox"] > span:first-child {{
+    background-color:var(--field) !important; border:2px solid #8d7f55 !important; border-radius:6px; }}
+.stApp label[data-baseweb="checkbox"]:has(input:checked) > span:first-child {{
+    background-color:var(--primary) !important; border-color:var(--primary) !important; }}
+
+/* رفع الملفات */
+[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploaderDropzone"] * {{
+    background-color:var(--field) !important; color:var(--ink) !important; }}
+[data-testid="stFileUploaderDropzone"] {{ border:1px dashed var(--line) !important; border-radius:14px !important; }}
+[data-testid="stFileUploaderDropzone"] button {{ background-color:var(--card) !important; border:1px solid var(--line) !important; }}
+[data-testid="stFileUploaderFile"], [data-testid="stFileUploaderFile"] * {{ background-color:transparent !important; color:var(--ink) !important; }}
+
+/* رسائل التنبيه والتوست */
+.stApp [data-testid="stAlert"] {{ background-color:#f1e5b8 !important; border:1px solid var(--line); border-radius:14px; }}
+.stApp [data-testid="stAlert"] * {{ background-color:transparent !important; color:var(--ink) !important; }}
+[data-testid="stToast"], [data-testid="stToast"] * {{ background-color:var(--card) !important; color:var(--ink) !important; }}
 
 /* التبويبات */
+.stApp button[data-baseweb="tab"] {{ background:transparent !important; }}
 .stApp button[data-baseweb="tab"][aria-selected="true"], .stApp button[data-baseweb="tab"][aria-selected="true"] * {{
     color:var(--primary) !important; font-weight:800; }}
 .stApp div[data-baseweb="tab-highlight"] {{ background:var(--primary) !important; }}
+.stApp div[data-baseweb="tab-border"] {{ background:var(--line) !important; }}
 
 /* الأزرار */
 .stApp button[data-testid^="stBaseButton-secondary"] {{
@@ -333,7 +358,7 @@ button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStep
     border-radius:12px; font-weight:700; padding:8px 22px; }}
 .stApp .stButton > button:hover, .stApp .stDownloadButton > button:hover {{ filter:brightness(.96); }}
 
-/* شريط التنقل: أزرار كبيرة ومتباعدة، والضغط على الاسم نفسه */
+/* شريط التنقل: أزرار كبيرة ومتباعدة */
 .st-key-topnav {{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 16px;
     box-shadow:0 2px 10px rgba(90,62,43,.08); }}
 .st-key-topnav [data-testid="stHorizontalBlock"] {{ gap:14px !important; }}
@@ -342,7 +367,7 @@ button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStep
 .st-key-topnav button p {{ font-size:16px !important; font-weight:800 !important; margin:0; }}
 
 /* ترويسة الصفحة: أخضر ونص أبيض */
-.app-header {{ background:linear-gradient(120deg,var(--deep),var(--primary));
+.app-header {{ background:linear-gradient(120deg,#073b30,#0b5d4b);
     padding:26px 32px; border-radius:20px; margin:18px 0 22px; }}
 .stApp .app-header, .stApp .app-header * {{ color:#fff !important; }}
 .app-header h1 {{ margin:0; font-size:2rem; font-weight:800; }}
@@ -357,10 +382,10 @@ button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStep
 .kpi-label {{ font-size:.95rem; color:var(--muted); font-weight:600; }}
 .kpi-value {{ font-size:1.7rem; font-weight:800; line-height:1.5; color:var(--ink); }}
 .kpi-sub {{ font-size:.88rem; color:var(--muted); min-height:1.2em; }}
-.kpi.main {{ background:linear-gradient(135deg,var(--deep),var(--primary)); border:none; }}
-.kpi.main::before {{ display:none; }}
-.stApp .kpi.main, .stApp .kpi.main * {{ color:#fff !important; }}
-.kpi.main .kpi-value {{ font-size:2.1rem; }}
+.kpi.hero {{ background:linear-gradient(135deg,#073b30,#0b5d4b) !important; border:none; }}
+.kpi.hero::before {{ display:none; }}
+.stApp .kpi.hero, .stApp .kpi.hero * {{ color:#fff !important; }}
+.kpi.hero .kpi-value {{ font-size:2.1rem; }}
 
 .stApp .section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px;
     border-right:4px solid var(--accent); color:var(--head); }}
@@ -384,8 +409,12 @@ button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStep
 .tbl td {{ padding:9px 14px; border-top:1px solid var(--line); color:var(--ink); text-align:right; }}
 .tbl tr:hover td {{ background:#f6ebc9; }}
 
-div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"],
-div[data-testid="stExpander"] details {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
+/* النماذج والحاويات والـ expander */
+div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"] {{
+    background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
+div[data-testid="stExpander"], div[data-testid="stExpander"] details,
+div[data-testid="stExpander"] summary {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
+div[data-testid="stExpander"] summary, div[data-testid="stExpander"] summary * {{ color:var(--ink) !important; }}
 @media (max-width:760px) {{ .kpi-value {{ font-size:1.35rem; }} .app-header {{ padding:18px; }} }}
 </style>""", unsafe_allow_html=True)
 
@@ -414,7 +443,9 @@ def page_header(title: str, subtitle: str = "") -> None:
     st.markdown(f'<div class="app-header"><h1>{esc(title)}</h1>{sub}</div>', unsafe_allow_html=True)
 
 def kpi(label: str, value: str, sub: str = "", tone: str = "") -> None:
-    st.markdown(f'<div class="kpi {tone}"><div class="kpi-label">{esc(label)}</div>'
+    tone = "hero" if tone == "main" else tone
+    style = ' style="background:linear-gradient(135deg,#073b30,#0b5d4b);color:#fff"' if tone == "hero" else ""
+    st.markdown(f'<div class="kpi {tone}"{style}><div class="kpi-label">{esc(label)}</div>'
                 f'<div class="kpi-value">{esc(value)}</div><div class="kpi-sub">{esc(sub)}</div></div>',
                 unsafe_allow_html=True)
 
