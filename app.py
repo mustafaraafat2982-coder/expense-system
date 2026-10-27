@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 3.1
+نظامي المالي الشخصي - الإصدار 3.2
 تشغيل: py -m streamlit run app.py
 """
 import calendar
@@ -43,10 +43,11 @@ PAGES = {
     "budgets": "🎯 الميزانيات والأهداف", "wishes": "✨ الأمنيات", "settings": "⚙️ الإعدادات",
 }
 
-# هوية الألوان: خلفية بيج، نص بني غامق، أخضر للدخل، مرجاني للمصروف
-C_PRIMARY, C_DEEP, C_INCOME = "#5a3e2b", "#3b2a1f", "#2f7d5b"
-C_EXPENSE, C_ACCENT, C_INK, C_MUTED = "#c8465a", "#b9791f", "#3b2a1f", "#7a6552"
-C_BG, C_CARD, C_LINE = "#f5ede0", "#fffaf2", "#e3d6c1"
+# هوية الألوان: خلفية سمني، أخضر أساسي، عناوين بني، كتابة سوداء
+C_PRIMARY, C_DEEP, C_INCOME = "#0b5d4b", "#073b30", "#0b5d4b"
+C_EXPENSE, C_ACCENT = "#d1495b", "#c8861a"
+C_INK, C_MUTED, C_HEAD = "#141414", "#4a4a4a", "#5a3e2b"
+C_BG, C_CARD, C_LINE, C_FIELD = "#f4e8c8", "#fbf3dc", "#e0cfa3", "#fdf7e6"
 
 # ==========================================================
 # 1. قاعدة البيانات
@@ -273,45 +274,79 @@ def inject_css() -> None:
     st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-:root {{ --primary:{C_PRIMARY}; --deep:{C_DEEP}; --ink:{C_INK}; --muted:{C_MUTED}; --bg:{C_BG};
-        --card:{C_CARD}; --line:{C_LINE}; --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:{C_INCOME}; }}
+:root {{ --primary:{C_PRIMARY}; --deep:{C_DEEP}; --ink:{C_INK}; --muted:{C_MUTED}; --head:{C_HEAD};
+        --bg:{C_BG}; --card:{C_CARD}; --line:{C_LINE}; --field:{C_FIELD};
+        --accent:{C_ACCENT}; --bad:{C_EXPENSE}; --good:{C_INCOME}; }}
+
+/* الخلفية السمني على كل الطبقات (بما فيها الحواف) */
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+[data-testid="stHeader"], [data-testid="stBottom"], .main {{ background:var(--bg) !important; }}
+
 .stApp, .stApp p, .stApp label, .stApp input, .stApp textarea, .stApp button,
 .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp [data-baseweb] {{ font-family:'Cairo',sans-serif !important; }}
-.stApp {{ direction:rtl; background:var(--bg); color:var(--ink); font-size:17px; color-scheme:light; }}
-.stApp p, .stApp label, .stApp span, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
-.stApp li, .stApp [data-testid="stCaptionContainer"] {{ color:var(--ink); }}
+.stApp {{ direction:rtl; color:var(--ink); font-size:17px; color-scheme:light; }}
+
+/* الكتابة العادية سوداء */
+.stApp p, .stApp label, .stApp span, .stApp li, .stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stMarkdownContainer"] {{ color:var(--ink); }}
+/* العناوين فقط بنية */
+.stApp h1, .stApp h2, .stApp h3, .stApp h4,
+.stApp h1 *, .stApp h2 *, .stApp h3 *, .stApp h4 * {{ color:var(--head); }}
+
 .block-container {{ max-width:1320px; padding-top:1.2rem; padding-bottom:4rem; }}
 header[data-testid="stHeader"], section[data-testid="stSidebar"], footer {{ display:none !important; }}
 h1,h2,h3,h4,p,label,.stMarkdown {{ text-align:right; }}
 
-/* الحقول: خلفية فاتحة ونص بني، وبدون أزرار +/- */
-div[data-baseweb="input"], div[data-baseweb="base-input"], div[data-baseweb="select"] > div,
-div[data-baseweb="textarea"], div[data-testid="stDateInput"] div[data-baseweb="input"] {{
-    background:var(--card) !important; border-color:var(--line) !important; border-radius:12px !important; }}
-.stApp input, .stApp textarea {{ background:var(--card) !important; color:var(--ink) !important;
+/* الحقول والقوائم المنسدلة: سمني فاتح ونص أسود */
+.stApp div[data-baseweb="input"], .stApp div[data-baseweb="base-input"],
+.stApp div[data-baseweb="textarea"], .stApp [data-testid="stNumberInput"] > div,
+.stApp div[data-baseweb="select"] > div {{
+    background:var(--field) !important; border-color:var(--line) !important; border-radius:12px !important; }}
+.stApp input, .stApp textarea {{ background:var(--field) !important; color:var(--ink) !important;
     -webkit-text-fill-color:var(--ink) !important; font-size:17px !important; }}
+.stApp div[data-baseweb="select"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
+.stApp div[data-baseweb="select"] svg {{ fill:var(--ink) !important; }}
+div[data-baseweb="popover"] *, ul[role="listbox"], ul[role="listbox"] * {{
+    background-color:var(--field) !important; color:var(--ink) !important; }}
+li[role="option"]:hover, li[role="option"][aria-selected="true"] {{ background-color:#efe0b3 !important; }}
+div[data-baseweb="calendar"], div[data-baseweb="calendar"] * {{ background-color:var(--field) !important; color:var(--ink) !important; }}
 button[data-testid="stNumberInputStepUp"], button[data-testid="stNumberInputStepDown"] {{ display:none !important; }}
-div[data-testid="stNumberInput"] > div {{ background:var(--card) !important; border-radius:12px; }}
+[data-testid="stFileUploaderDropzone"] {{ background:var(--field) !important; border:1px dashed var(--line) !important;
+    border-radius:14px !important; }}
+[data-testid="stFileUploaderDropzone"] * {{ color:var(--ink) !important; }}
+[data-testid="stFileUploaderDropzone"] button {{ background:var(--card) !important; border:1px solid var(--line) !important; }}
 
-/* شريط التنقل: أقراص أفقية */
-div[data-testid="stRadio"] > div[role="radiogroup"] {{
-    display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
-    background:var(--card); padding:8px; border-radius:16px; border:1px solid var(--line);
-    box-shadow:0 2px 10px rgba(59,42,31,.07); }}
-div[data-testid="stRadio"] label[data-baseweb="radio"] {{
-    padding:9px 18px; border-radius:12px; cursor:pointer; margin:0; transition:background .15s; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"] > div:first-of-type {{ display:none !important; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"] p {{ color:var(--ink) !important; opacity:1 !important;
-    font-weight:700; font-size:16px; margin:0; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:hover {{ background:#efe3cf; }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{ background:var(--deep); }}
-div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {{ color:#fff !important; }}
+/* التبويبات */
+.stApp button[data-baseweb="tab"][aria-selected="true"], .stApp button[data-baseweb="tab"][aria-selected="true"] * {{
+    color:var(--primary) !important; font-weight:800; }}
+.stApp div[data-baseweb="tab-highlight"] {{ background:var(--primary) !important; }}
 
-/* ترويسة الصفحة */
-.app-header {{ background:linear-gradient(120deg,var(--deep),#6b4a33); color:#fff;
+/* الأزرار */
+.stApp button[data-testid^="stBaseButton-secondary"] {{
+    background:var(--card) !important; border:1px solid var(--line) !important; color:var(--ink) !important; }}
+.stApp button[data-testid^="stBaseButton-secondary"] * {{ color:var(--ink) !important; }}
+.stApp button[data-testid^="stBaseButton-primary"] {{
+    background:var(--primary) !important; border:1px solid var(--primary) !important; }}
+.stApp button[data-testid^="stBaseButton-primary"], .stApp button[data-testid^="stBaseButton-primary"] * {{
+    color:#fff !important; }}
+.stApp .stButton > button, .stApp .stDownloadButton > button, .stApp [data-testid="stFormSubmitButton"] > button {{
+    border-radius:12px; font-weight:700; padding:8px 22px; }}
+.stApp .stButton > button:hover, .stApp .stDownloadButton > button:hover {{ filter:brightness(.96); }}
+
+/* شريط التنقل: أزرار كبيرة ومتباعدة، والضغط على الاسم نفسه */
+.st-key-topnav {{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 16px;
+    box-shadow:0 2px 10px rgba(90,62,43,.08); }}
+.st-key-topnav [data-testid="stHorizontalBlock"] {{ gap:14px !important; }}
+.st-key-topnav button {{ min-height:58px; width:100%; font-size:16px !important; font-weight:800 !important;
+    border-radius:14px !important; padding:6px 10px !important; line-height:1.4; }}
+.st-key-topnav button p {{ font-size:16px !important; font-weight:800 !important; margin:0; }}
+
+/* ترويسة الصفحة: أخضر ونص أبيض */
+.app-header {{ background:linear-gradient(120deg,var(--deep),var(--primary));
     padding:26px 32px; border-radius:20px; margin:18px 0 22px; }}
-.app-header h1 {{ margin:0; font-size:2rem; font-weight:800; color:#fff; }}
-.app-header p {{ margin:6px 0 0; opacity:.88; font-size:1.05rem; color:#fff; }}
+.stApp .app-header, .stApp .app-header * {{ color:#fff !important; }}
+.app-header h1 {{ margin:0; font-size:2rem; font-weight:800; }}
+.app-header p {{ margin:6px 0 0; opacity:.9; font-size:1.05rem; }}
 
 /* بطاقات المؤشرات */
 .kpi {{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 20px;
@@ -322,35 +357,57 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {{ c
 .kpi-label {{ font-size:.95rem; color:var(--muted); font-weight:600; }}
 .kpi-value {{ font-size:1.7rem; font-weight:800; line-height:1.5; color:var(--ink); }}
 .kpi-sub {{ font-size:.88rem; color:var(--muted); min-height:1.2em; }}
-.kpi.main {{ background:linear-gradient(135deg,var(--deep),#6b4a33); border:none; }}
+.kpi.main {{ background:linear-gradient(135deg,var(--deep),var(--primary)); border:none; }}
 .kpi.main::before {{ display:none; }}
-.kpi.main .kpi-label, .kpi.main .kpi-value, .kpi.main .kpi-sub {{ color:#fff; }}
+.stApp .kpi.main, .stApp .kpi.main * {{ color:#fff !important; }}
 .kpi.main .kpi-value {{ font-size:2.1rem; }}
 
-.section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px;
-    border-right:4px solid var(--accent); color:var(--ink); }}
+.stApp .section-title {{ font-weight:800; font-size:1.3rem; margin:26px 0 12px; padding-right:12px;
+    border-right:4px solid var(--accent); color:var(--head); }}
 
 /* شريط التقدم */
 .bar-row {{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 16px; margin-bottom:10px; }}
-.bar-head {{ display:flex; justify-content:space-between; font-weight:700; margin-bottom:8px; color:var(--ink); }}
-.bar-head span:last-child {{ color:var(--muted); font-weight:600; font-size:.92rem; }}
-.bar-track {{ background:#eadfcb; border-radius:99px; height:10px; overflow:hidden; }}
+.bar-head {{ display:flex; justify-content:space-between; font-weight:700; margin-bottom:8px; }}
+.stApp .bar-head span:first-child {{ color:var(--ink); }}
+.stApp .bar-head span:last-child {{ color:var(--muted); font-weight:600; font-size:.92rem; }}
+.bar-track {{ background:#eadcb0; border-radius:99px; height:10px; overflow:hidden; }}
 .bar-fill {{ height:100%; border-radius:99px; }}
 
-.tip {{ background:#fbf0d9; border:1px solid #ecd49b; border-right:5px solid var(--accent);
-    border-radius:14px; padding:12px 16px; margin:8px 0; color:var(--ink); }}
+.tip {{ background:#f8e9bd; border:1px solid #e6cd86; border-right:5px solid var(--accent);
+    border-radius:14px; padding:12px 16px; margin:8px 0; }}
 
-.stButton > button, .stDownloadButton > button {{ border-radius:12px; font-weight:700; padding:8px 22px; }}
-div[data-testid="stForm"], div[data-testid="stExpander"], div[data-testid="stVerticalBlockBorderWrapper"] {{
-    background:var(--card); border-radius:16px; border-color:var(--line); }}
+/* الجداول */
+.tbl-wrap {{ max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:var(--card); }}
+.tbl {{ width:100%; border-collapse:collapse; font-size:15px; direction:rtl; }}
+.tbl th {{ position:sticky; top:0; background:#ecdcae; color:var(--head); text-align:right;
+    padding:10px 14px; font-weight:800; }}
+.tbl td {{ padding:9px 14px; border-top:1px solid var(--line); color:var(--ink); text-align:right; }}
+.tbl tr:hover td {{ background:#f6ebc9; }}
+
+div[data-testid="stForm"], div[data-testid="stVerticalBlockBorderWrapper"],
+div[data-testid="stExpander"] details {{ background:var(--card) !important; border-radius:16px; border-color:var(--line) !important; }}
 @media (max-width:760px) {{ .kpi-value {{ font-size:1.35rem; }} .app-header {{ padding:18px; }} }}
 </style>""", unsafe_allow_html=True)
 
+def set_page(key: str) -> None:
+    st.session_state["current_page"] = key
+
+def _stretch(fn, *args, **kwargs):
+    try:
+        return fn(*args, width="stretch", **kwargs)
+    except TypeError:
+        return fn(*args, use_container_width=True, **kwargs)
+
 def render_top_nav() -> None:
-    if st.session_state.get("current_page") not in PAGES:
-        st.session_state["current_page"] = "dashboard"
-    st.radio("التنقل", list(PAGES), format_func=PAGES.get, key="current_page",
-             horizontal=True, label_visibility="collapsed")
+    ss = st.session_state
+    if ss.get("current_page") not in PAGES:
+        ss["current_page"] = "dashboard"
+    with st.container(key="topnav"):
+        cols = st.columns(len(PAGES), gap="medium")
+        for col, (key, label) in zip(cols, PAGES.items()):
+            _stretch(col.button, label, key=f"nav_{key}",
+                     type="primary" if ss["current_page"] == key else "secondary",
+                     on_click=set_page, args=(key,))
 
 def page_header(title: str, subtitle: str = "") -> None:
     sub = f"<p>{esc(subtitle)}</p>" if subtitle else ""
@@ -378,17 +435,21 @@ def tip(text: str) -> None:
 def rate_tone(rate: float) -> str:
     return "good" if rate >= 20 else "warn" if rate >= 10 else "bad"
 
-def _stretch(fn, *args, **kwargs):
-    try:
-        return fn(*args, width="stretch", **kwargs)
-    except TypeError:
-        return fn(*args, use_container_width=True, **kwargs)
-
-def show_df(df: pd.DataFrame, **kwargs):
-    return _stretch(st.dataframe, df, hide_index=True, **kwargs)
+def html_table(df: pd.DataFrame, max_rows: int = 300) -> None:
+    head = "".join(f"<th>{esc(c)}</th>" for c in df.columns)
+    rows = "".join("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>"
+                   for r in df.head(max_rows).itertuples(index=False))
+    st.markdown(f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{head}</tr></thead>'
+                f'<tbody>{rows}</tbody></table></div>', unsafe_allow_html=True)
+    if len(df) > max_rows:
+        st.caption(f"يعرض أحدث {max_rows} عملية من {len(df)}. استخدم البحث أو اختر شهرًا لتضييق النتائج.")
 
 def show_chart(chart) -> None:
-    _stretch(st.altair_chart, chart)
+    chart = (chart.configure(background="transparent")
+             .configure_axis(labelColor=C_INK, titleColor=C_INK, gridColor=C_LINE, domainColor=C_LINE)
+             .configure_legend(labelColor=C_INK, titleColor=C_INK)
+             .configure_view(strokeWidth=0))
+    _stretch(st.altair_chart, chart, theme=None)
 
 def flash(msg: str) -> None:
     st.session_state["flash"] = msg
@@ -690,7 +751,7 @@ def page_expenses() -> None:
         shown = df.copy()
         shown["amount"] = shown["amount"].map(fmt)
         shown.columns = ["م", "التاريخ", "المبلغ", "التفاصيل", "التصنيف"]
-        show_df(shown)
+        html_table(shown)
 
         sel = st.selectbox("اختر العملية للتعديل أو الحذف", df["id"].tolist(),
                            format_func=lambda i: f"#{i} — {df.loc[df.id == i, 'details'].iloc[0]} "
@@ -848,7 +909,7 @@ def page_wishes() -> None:
             bought["bought_at"] = bought["bought_at"].str[:10]
             bought["price"] = bought["price"].map(fmt)
             bought.columns = ["الاسم", "السعر", "تاريخ الشراء"]
-            show_df(bought)
+            html_table(bought)
 
 def page_settings() -> None:
     page_header("⚙️ الإعدادات", "الاسم، النسخ الاحتياطي، وإدارة البيانات")
