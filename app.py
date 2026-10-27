@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 2.3 (قائمة صفين + بدون مساعد ذكي)
+نظامي المالي الشخصي - الإصدار 2.4 (كامل ومُصلح)
 تشغيل: py -m streamlit run app.py
 """
 import base64
@@ -31,7 +31,7 @@ MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو",
              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
 
 CAT_META = {
-    "طعام وشراب": ("️", "need"), "مواصلات": ("🚌", "need"),
+    "طعام وشراب": ("🍽️", "need"), "مواصلات": ("🚌", "need"),
     "فواتير": ("🧾", "need"), "صحة": ("🩺", "need"), "تعليم": ("🎓", "need"),
     "ملابس": ("👕", "want"), "ترفيه": ("🎬", "want"), "أخرى": ("📦", "want"),
 }
@@ -282,7 +282,6 @@ p, label, .stMarkdown, input, textarea, select {{ font-size: 18px !important; }}
 .block-container {{ direction: rtl; padding-top: 2rem; max-width: 1400px; }}
 h1, h2, h3, h4, p, label, .stMarkdown {{ text-align: right; }}
 
-/* القائمة الأفقية - صفين */
 .top-nav {{
     background: {C_PRIMARY};
     padding: 20px 25px;
@@ -365,7 +364,6 @@ section[data-testid="stSidebar"] {{
 """, unsafe_allow_html=True)
 
 def render_top_nav():
-    """رسم القائمة الأفقية في صفين"""
     pages = [
         ("📊 لوحة التحكم", "dashboard"),
         ("💸 سجل المصاريف", "expenses"),
@@ -379,29 +377,24 @@ def render_top_nav():
     if "current_page" not in st.session_state:
         st.session_state.current_page = "dashboard"
     
-    # تقسيم الصفحات على صفين: 4 في الأول و 3 في الثاني
     row1 = pages[:4]
     row2 = pages[4:]
     
     st.markdown('<div class="top-nav">', unsafe_allow_html=True)
     
-    # الصف الأول
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
     cols1 = st.columns(4)
     for i, (label, page_key) in enumerate(row1):
         with cols1[i]:
-            is_active = st.session_state.current_page == page_key
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # الصف الثاني
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
     cols2 = st.columns(4)
     for i, (label, page_key) in enumerate(row2):
         with cols2[i]:
-            is_active = st.session_state.current_page == page_key
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
@@ -494,7 +487,7 @@ def render_expense_form(scope: str) -> None:
     nonce = ss.setdefault(f"nonce_{scope}", 0)
     def k(n): return f"{scope}_{n}_{nonce}"
 
-    files = st.file_uploader(" ارفع فاتورة أو سكرين رسالة بنك (اختياري)",
+    files = st.file_uploader("📎 ارفع فاتورة أو سكرين رسالة بنك (اختياري)",
                              type=FILE_TYPES, accept_multiple_files=True, key=k("files"))
     if files:
         a, b = st.columns([1, 1])
@@ -548,7 +541,7 @@ def render_edit_panel(eid: int) -> None:
                     show_attachment(int(at.id), width=200)
                     if st.checkbox(f"حذف ({at.kind})", key=f"{k}_delatt_{at.id}"):
                         to_delete.append(int(at.id))
-        new_files = st.file_uploader(" إضافة مرفقات جديدة", type=FILE_TYPES,
+        new_files = st.file_uploader("📎 إضافة مرفقات جديدة", type=FILE_TYPES,
                                      accept_multiple_files=True, key=f"{k}_newfiles")
         kind = st.selectbox("نوع المستند", DOC_KINDS, key=f"{k}_kind") if new_files else DOC_KINDS[0]
 
@@ -570,7 +563,7 @@ def render_edit_panel(eid: int) -> None:
                 st.rerun()
         with s2:
             if st.checkbox("أؤكد حذف هذا المصروف ومرفقاته", key=f"{k}_confirm"):
-                if st.button("️ حذف المصروف", key=f"{k}_del"):
+                if st.button("🗑️ حذف المصروف", key=f"{k}_del"):
                     run_many([("DELETE FROM attachments WHERE expense_id=?", (eid,)),
                               ("DELETE FROM daily_expenses WHERE id=?", (eid,))])
                     st.session_state["log_nonce"] = st.session_state.get("log_nonce", 0) + 1
@@ -734,12 +727,13 @@ def page_financial_details() -> None:
     if not df.empty:
         for idx, r in df.iterrows():
             col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 3, 1])
-            col1.write(f"**{r.kind}**")
+            col1.write(f"**{r['kind']}**")
             col2.write(r['name'])
-            col3.write(fmt(r.amount))
-            col4.write(r.note or "-")
-            if col5.button("🗑️", key=f"del_fin_{r.id}"):
-                run("DELETE FROM fin_details WHERE id=?", (r.id,))
+            col3.write(fmt(r['amount']))
+            col4.write(r['note'] or "-")
+            item_id = int(r['id'])
+            if col5.button("🗑️", key=f"del_fin_{item_id}"):
+                run("DELETE FROM fin_details WHERE id=?", (item_id,))
                 flash("تم حذف البند.")
                 st.rerun()
 
@@ -878,7 +872,7 @@ def page_settings() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================================
-# 8. التوجيه الرئيسي للبرنامج
+# 8. التوجيه الرئيسي للبرنامج (محصّن)
 # ==========================================================
 def main():
     inject_css()
@@ -889,10 +883,17 @@ def main():
         st.toast(st.session_state["flash"])
         st.session_state["flash"] = None
 
+    # التأكد من وجود قيمة صحيحة للصفحة الحالية
+    valid_pages = ["dashboard", "expenses", "monthly", "financial", "budgets", "wishes", "settings"]
+    current = st.session_state.get("current_page", "dashboard")
+    if current not in valid_pages:
+        current = "dashboard"
+        st.session_state.current_page = "dashboard"
+
     # عرض القائمة الأفقية في الأعلى (صفين)
     render_top_nav()
 
-    # عرض الصفحة الحالية (بدون المساعد الذكي)
+    # قاموس الصفحات
     pages = {
         "dashboard": page_dashboard,
         "expenses": page_expenses,
@@ -903,8 +904,15 @@ def main():
         "settings": page_settings,
     }
 
-    current = st.session_state.get("current_page", "dashboard")
-    pages[current]()
+    # استدعاء الصفحة الحالية مع حماية من الأخطاء
+    try:
+        page_func = pages.get(current, page_dashboard)
+        page_func()
+    except Exception as e:
+        st.error(f"حدث خطأ في تحميل الصفحة: {e}")
+        st.info("جاري إعادة التوجيه للوحة التحكم...")
+        st.session_state.current_page = "dashboard"
+        st.rerun()
 
 if __name__ == "__main__":
     main()
