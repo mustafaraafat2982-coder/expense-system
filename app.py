@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 2.4 (كامل ومُصلح)
+نظامي المالي الشخصي - الإصدار 2.5 (إصلاح التنقل بين الصفحات)
 تشغيل: py -m streamlit run app.py
 """
 import base64
@@ -364,6 +364,7 @@ section[data-testid="stSidebar"] {{
 """, unsafe_allow_html=True)
 
 def render_top_nav():
+    """رسم القائمة الأفقية في صفين مع تنقل موثوق"""
     pages = [
         ("📊 لوحة التحكم", "dashboard"),
         ("💸 سجل المصاريف", "expenses"),
@@ -374,6 +375,7 @@ def render_top_nav():
         ("⚙️ الإعدادات", "settings"),
     ]
     
+    # التأكد من تهيئة الصفحة الحالية
     if "current_page" not in st.session_state:
         st.session_state.current_page = "dashboard"
     
@@ -382,19 +384,24 @@ def render_top_nav():
     
     st.markdown('<div class="top-nav">', unsafe_allow_html=True)
     
+    # الصف الأول
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
     cols1 = st.columns(4)
     for i, (label, page_key) in enumerate(row1):
         with cols1[i]:
+            is_active = st.session_state.current_page == page_key
+            # استخدام use_container_width لضمان عمل الزر
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
     
+    # الصف الثاني
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
     cols2 = st.columns(4)
     for i, (label, page_key) in enumerate(row2):
         with cols2[i]:
+            is_active = st.session_state.current_page == page_key
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
@@ -872,7 +879,7 @@ def page_settings() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================================
-# 8. التوجيه الرئيسي للبرنامج (محصّن)
+# 8. التوجيه الرئيسي للبرنامج (محصّن وموثوق)
 # ==========================================================
 def main():
     inject_css()
@@ -883,9 +890,12 @@ def main():
         st.toast(st.session_state["flash"])
         st.session_state["flash"] = None
 
-    # التأكد من وجود قيمة صحيحة للصفحة الحالية
+    # التأكد من تهيئة الصفحة الحالية بشكل صحيح
+    if "current_page" not in st.session_state or st.session_state.current_page is None:
+        st.session_state.current_page = "dashboard"
+
     valid_pages = ["dashboard", "expenses", "monthly", "financial", "budgets", "wishes", "settings"]
-    current = st.session_state.get("current_page", "dashboard")
+    current = st.session_state.current_page
     if current not in valid_pages:
         current = "dashboard"
         st.session_state.current_page = "dashboard"
@@ -904,15 +914,9 @@ def main():
         "settings": page_settings,
     }
 
-    # استدعاء الصفحة الحالية مع حماية من الأخطاء
-    try:
-        page_func = pages.get(current, page_dashboard)
-        page_func()
-    except Exception as e:
-        st.error(f"حدث خطأ في تحميل الصفحة: {e}")
-        st.info("جاري إعادة التوجيه للوحة التحكم...")
-        st.session_state.current_page = "dashboard"
-        st.rerun()
+    # استدعاء الصفحة الحالية
+    page_func = pages.get(current, page_dashboard)
+    page_func()
 
 if __name__ == "__main__":
     main()
