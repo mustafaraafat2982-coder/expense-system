@@ -1,5 +1,5 @@
 """
-نظامي المالي الشخصي - الإصدار 2.5 (إصلاح التنقل بين الصفحات)
+نظامي المالي الشخصي - الإصدار 2.6 (بدون التفاصيل المالية)
 تشغيل: py -m streamlit run app.py
 """
 import base64
@@ -32,7 +32,7 @@ MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو",
 
 CAT_META = {
     "طعام وشراب": ("🍽️", "need"), "مواصلات": ("🚌", "need"),
-    "فواتير": ("🧾", "need"), "صحة": ("🩺", "need"), "تعليم": ("🎓", "need"),
+    "فواتير": ("", "need"), "صحة": ("", "need"), "تعليم": ("", "need"),
     "ملابس": ("👕", "want"), "ترفيه": ("🎬", "want"), "أخرى": ("📦", "want"),
 }
 DOC_KINDS = ["فاتورة", "رسالة بنك", "معاملة إلكترونية", "إيصال", "أخرى"]
@@ -364,44 +364,36 @@ section[data-testid="stSidebar"] {{
 """, unsafe_allow_html=True)
 
 def render_top_nav():
-    """رسم القائمة الأفقية في صفين مع تنقل موثوق"""
     pages = [
         ("📊 لوحة التحكم", "dashboard"),
         ("💸 سجل المصاريف", "expenses"),
         ("📅 التفاصيل الشهرية", "monthly"),
-        ("💼 التفاصيل المالية", "financial"),
         ("🎯 الميزانيات والأهداف", "budgets"),
         ("✨ قائمة الأمنيات", "wishes"),
         ("⚙️ الإعدادات", "settings"),
     ]
     
-    # التأكد من تهيئة الصفحة الحالية
     if "current_page" not in st.session_state:
         st.session_state.current_page = "dashboard"
     
-    row1 = pages[:4]
-    row2 = pages[4:]
+    row1 = pages[:3]
+    row2 = pages[3:]
     
     st.markdown('<div class="top-nav">', unsafe_allow_html=True)
     
-    # الصف الأول
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
-    cols1 = st.columns(4)
+    cols1 = st.columns(3)
     for i, (label, page_key) in enumerate(row1):
         with cols1[i]:
-            is_active = st.session_state.current_page == page_key
-            # استخدام use_container_width لضمان عمل الزر
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # الصف الثاني
     st.markdown('<div class="nav-row">', unsafe_allow_html=True)
-    cols2 = st.columns(4)
+    cols2 = st.columns(3)
     for i, (label, page_key) in enumerate(row2):
         with cols2[i]:
-            is_active = st.session_state.current_page == page_key
             if st.button(label, key=f"nav_{page_key}", use_container_width=True):
                 st.session_state.current_page = page_key
                 st.rerun()
@@ -494,7 +486,7 @@ def render_expense_form(scope: str) -> None:
     nonce = ss.setdefault(f"nonce_{scope}", 0)
     def k(n): return f"{scope}_{n}_{nonce}"
 
-    files = st.file_uploader("📎 ارفع فاتورة أو سكرين رسالة بنك (اختياري)",
+    files = st.file_uploader(" ارفع فاتورة أو سكرين رسالة بنك (اختياري)",
                              type=FILE_TYPES, accept_multiple_files=True, key=k("files"))
     if files:
         a, b = st.columns([1, 1])
@@ -548,7 +540,7 @@ def render_edit_panel(eid: int) -> None:
                     show_attachment(int(at.id), width=200)
                     if st.checkbox(f"حذف ({at.kind})", key=f"{k}_delatt_{at.id}"):
                         to_delete.append(int(at.id))
-        new_files = st.file_uploader("📎 إضافة مرفقات جديدة", type=FILE_TYPES,
+        new_files = st.file_uploader(" إضافة مرفقات جديدة", type=FILE_TYPES,
                                      accept_multiple_files=True, key=f"{k}_newfiles")
         kind = st.selectbox("نوع المستند", DOC_KINDS, key=f"{k}_kind") if new_files else DOC_KINDS[0]
 
@@ -570,7 +562,7 @@ def render_edit_panel(eid: int) -> None:
                 st.rerun()
         with s2:
             if st.checkbox("أؤكد حذف هذا المصروف ومرفقاته", key=f"{k}_confirm"):
-                if st.button("🗑️ حذف المصروف", key=f"{k}_del"):
+                if st.button("️ حذف المصروف", key=f"{k}_del"):
                     run_many([("DELETE FROM attachments WHERE expense_id=?", (eid,)),
                               ("DELETE FROM daily_expenses WHERE id=?", (eid,))])
                     st.session_state["log_nonce"] = st.session_state.get("log_nonce", 0) + 1
@@ -612,18 +604,13 @@ def page_dashboard() -> None:
     with c[3]: kpi("الرصيد المرحل", fmt(s["opening"]), s["carry_note"] or "لا يوجد ترحيل")
     with c[4]: kpi("متبقي معك", fmt(s["closing"]), "المرحل + المستلم − المصروف", "main")
 
-    section("💼 التفاصيل المالية")
+    section("💼 ملخص الوضع المالي")
     fdf, assets, liab = fin_totals()
-    if fdf.empty:
-        st.info("لم تسجّل وضعك المالي الحالي بعد. سجّله من صفحة «التفاصيل المالية».")
-    else:
+    if not fdf.empty:
         f = st.columns(3)
         with f[0]: kpi("مدخراتك وأصولك", fmt(assets), f"{len(fdf)} بند", "good")
         with f[1]: kpi("التزامات عليك", fmt(liab), "", "bad" if liab else "")
         with f[2]: kpi("إجمالي ما تملكه تقريبًا", fmt(assets - liab + s["closing"]), "التفاصيل + متبقي معك")
-        with st.expander("عرض بنود التفاصيل المالية"):
-            show_df(pd.DataFrame({"النوع": fdf.kind, "البند": fdf.name, "المبلغ": fdf.amount.map(fmt),
-                                  "ملاحظة": fdf.note.fillna("")}))
 
     with st.expander("➕ إضافة مصروف سريع"):
         render_expense_form("dash")
@@ -664,7 +651,7 @@ def page_expenses() -> None:
         c1, c2, c3 = st.columns([1, 1, 2])
         y = year_picker("exp_y", c1)
         m = month_picker("exp_m", c2, allow_all=True)
-        query = c3.text_input("🔍 بحث بالتفاصيل أو التصنيف", key="exp_q")
+        query = c3.text_input(" بحث بالتفاصيل أو التصنيف", key="exp_q")
 
         sql = "SELECT id, expense_date, amount, details, category FROM daily_expenses WHERE year=? "
         params = [y]
@@ -722,45 +709,8 @@ def page_monthly_details() -> None:
             flash("✅ تم حفظ البيانات الشهرية بنجاح.")
             st.rerun()
 
-def page_financial_details() -> None:
-    page_header("💼 التفاصيل المالية", "إدارة الحسابات والمدخرات والالتزامات")
-    df, assets, liab = fin_totals()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("إجمالي الأصول والمدخرات", fmt(assets))
-    c2.metric("إجمالي الالتزامات (الديون)", fmt(liab))
-    c3.metric("صافي الثروة المسجلة", fmt(assets - liab))
-
-    section("البنود المسجلة حاليًا")
-    if not df.empty:
-        for idx, r in df.iterrows():
-            col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 3, 1])
-            col1.write(f"**{r['kind']}**")
-            col2.write(r['name'])
-            col3.write(fmt(r['amount']))
-            col4.write(r['note'] or "-")
-            item_id = int(r['id'])
-            if col5.button("🗑️", key=f"del_fin_{item_id}"):
-                run("DELETE FROM fin_details WHERE id=?", (item_id,))
-                flash("تم حذف البند.")
-                st.rerun()
-
-    section("➕ إضافة بند جديد")
-    with st.form("new_fin"):
-        f1, f2 = st.columns(2)
-        kind = f1.selectbox("نوع البند", FIN_KINDS)
-        name = f2.text_input("اسم البند")
-        f3, f4 = st.columns(2)
-        amount = f3.number_input("المبلغ / القيمة", min_value=0.0, step=1000.0)
-        note = f4.text_input("ملاحظات")
-        if st.form_submit_button("إضافة البند", type="primary"):
-            if name.strip() and amount > 0:
-                run("INSERT INTO fin_details (kind, name, amount, note) VALUES (?,?,?,?)",
-                    (kind, name.strip(), amount, note.strip()))
-                flash("✅ تمت إضافة البند المالي.")
-                st.rerun()
-
 def page_budgets() -> None:
-    page_header("🎯 الميزانيات والأهداف", "تحديد الحدود الشهرية للإنفاق")
+    page_header(" الميزانيات والأهداف", "تحديد الحدود الشهرية للإنفاق")
     tab1, tab2 = st.tabs(["📉 الميزانيات الشهرية", "🚀 الأهداف المالية"])
     with tab1:
         section("تحديد حد أقصى للإنفاق حسب التصنيف")
@@ -879,7 +829,7 @@ def page_settings() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================================
-# 8. التوجيه الرئيسي للبرنامج (محصّن وموثوق)
+# 8. التوجيه الرئيسي للبرنامج (محصّن)
 # ==========================================================
 def main():
     inject_css()
@@ -890,17 +840,17 @@ def main():
         st.toast(st.session_state["flash"])
         st.session_state["flash"] = None
 
-    # التأكد من تهيئة الصفحة الحالية بشكل صحيح
+    # التأكد من تهيئة الصفحة الحالية
     if "current_page" not in st.session_state or st.session_state.current_page is None:
         st.session_state.current_page = "dashboard"
 
-    valid_pages = ["dashboard", "expenses", "monthly", "financial", "budgets", "wishes", "settings"]
+    valid_pages = ["dashboard", "expenses", "monthly", "budgets", "wishes", "settings"]
     current = st.session_state.current_page
     if current not in valid_pages:
         current = "dashboard"
         st.session_state.current_page = "dashboard"
 
-    # عرض القائمة الأفقية في الأعلى (صفين)
+    # عرض القائمة الأفقية في الأعلى (صفين: 3 + 3)
     render_top_nav()
 
     # قاموس الصفحات
@@ -908,7 +858,6 @@ def main():
         "dashboard": page_dashboard,
         "expenses": page_expenses,
         "monthly": page_monthly_details,
-        "financial": page_financial_details,
         "budgets": page_budgets,
         "wishes": page_wishes,
         "settings": page_settings,
